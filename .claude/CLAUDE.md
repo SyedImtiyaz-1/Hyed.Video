@@ -101,8 +101,8 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   pick to `/api/reels/[id]/chat` (`selection`, added to the context in the web route; core and render unchanged); the
   draft autosaves in the browser (`hyped:reel-draft:<job>`, back on reopen until exported) with Saved / Saving… in the
   bar; an aspect chip; the timeline zooms with a slider, Fit and ⌘/Ctrl+wheel around the pointer, its ruler adapts, and
-  empty tracks hide (a toggle); keys: a frame per arrow, ↑/↓ caption lines, ⌘E, ⌘/, [ and ], ? for the list
-  (`shortcuts-dialog.tsx`); the editor fills the window and never scrolls as a page (2 Nov: the bar and the timeline
+  empty tracks hide (a toggle); keys: a frame per arrow, ↑/↓ caption lines, ⌘E, ⌘/, [ and ], F, ? for the list
+  (`shortcuts-dialog.tsx`); a full-screen preview (the button under it, or F; Esc leaves); the editor fills the window and never scrolls as a page (2 Nov: the bar and the timeline
   keep their height, the panels and the preview take the rest, the preview sized to its column with container units;
   the same for the empty editor and the first cut's frame). Still to do from the spec: an editable name, play
   controls and a resizable height in the timeline's header, 120px track labels with icons, panel headers with search,

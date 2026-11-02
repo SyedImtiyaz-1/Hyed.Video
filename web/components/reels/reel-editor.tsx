@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeft, AudioLines, Captions, Check, CircleAlert, FileText, Film, FolderOpen, Keyboard, LoaderCircle, Palette, PanelLeft, PanelRight, Pause, Play, Plus, Redo2, Scissors, Smile, Sparkles, Undo2, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Check, CircleAlert, FileText, Film, FolderOpen, Keyboard, LoaderCircle, Maximize, Minimize, Palette, PanelLeft, PanelRight, Pause, Play, Plus, Redo2, Scissors, Smile, Sparkles, Undo2, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { captionLines, cueOf, lineOfWord, resolveLook, type ReelLookChanges, type ReelStyle } from "@launchreel/core/captions";
@@ -313,6 +313,20 @@ export function ReelEditor({
     else v.pause();
   };
 
+  // Full screen (the button under the preview, or F): the preview's column, with its controls, takes the whole screen;
+  // Escape or the button again leaves it.
+  const stage = useRef<HTMLDivElement>(null);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const change = () => setFull(Boolean(stage.current) && document.fullscreenElement === stage.current);
+    document.addEventListener("fullscreenchange", change);
+    return () => document.removeEventListener("fullscreenchange", change);
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void stage.current?.requestFullscreen?.().catch(() => {});
+  };
+
   // The frame's width in pixels (blur and colour split are shares of it).
   const frameRef = useRef<HTMLDivElement>(null);
   const [frameWidth, setFrameWidth] = useState(300);
@@ -572,6 +586,8 @@ export function ReelEditor({
         else setRightOpen((o) => !o);
       } else if (e.key === "?") {
         setKeysOpen(true);
+      } else if (e.key === "f" || e.key === "F") {
+        toggleFull();
       } else if (e.key === "Delete" || e.key === "Backspace") {
         if (range) cutRange();
         else if (timelinePick) removePicked();
@@ -852,7 +868,12 @@ export function ReelEditor({
             keeps the clip's), as large as the column allows: on wide screens the column is a size container, and the
             frame is as wide as its height (less the controls under it) allows for the reel's shape. */}
         <div
-          className="lg:col-start-3 lg:row-start-1 lg:flex lg:flex-col lg:items-center lg:justify-center lg:overflow-y-auto lg:[container-type:size]"
+          ref={stage}
+          className={cn(
+            "lg:col-start-3 lg:row-start-1 lg:flex lg:flex-col lg:items-center lg:justify-center lg:overflow-y-auto lg:[container-type:size]",
+            // Full screen: the same column, the whole screen, on black (the frame sizes itself to it as on wide screens).
+            full && "flex flex-col items-center justify-center overflow-y-auto bg-black p-4 [container-type:size]",
+          )}
           style={{ "--shape": draft.edit.width / draft.edit.height } as React.CSSProperties}
         >
           <div
@@ -860,6 +881,7 @@ export function ReelEditor({
             className={cn(
               "relative mx-auto w-full shrink-0 overflow-hidden rounded-xl bg-black lg:w-[min(100cqw,calc((100cqh-4rem)*var(--shape)))] lg:max-w-none",
               portrait ? "max-w-[240px] sm:max-w-[300px]" : "max-w-[640px]",
+              full && "w-[min(100cqw,calc((100cqh-4rem)*var(--shape)))] max-w-none",
             )}
             style={{ aspectRatio: `${draft.edit.width} / ${draft.edit.height}` }}
           >
@@ -925,7 +947,13 @@ export function ReelEditor({
               {"word" in inline && <WordPanel word={inline.word} edit={draft.edit} keyName={keyName} emojisOn={draft.options.emojis && !behind} zoomsOn={draft.options.zooms} sfxOn={draft.options.sfx} cut={cutWords.has(inline.word)} actions={wordActions} dark />}
             </InlineEditor>
           )}
-          <div className={cn("mx-auto mt-3 flex w-full shrink-0 items-center gap-3 lg:w-[min(100cqw,max(16rem,calc((100cqh-4rem)*var(--shape))))] lg:max-w-none", portrait ? "max-w-[300px]" : "max-w-[640px]")}>
+          <div
+            className={cn(
+              "mx-auto mt-3 flex w-full shrink-0 items-center gap-3 lg:w-[min(100cqw,max(16rem,calc((100cqh-4rem)*var(--shape))))] lg:max-w-none",
+              portrait ? "max-w-[300px]" : "max-w-[640px]",
+              full && "w-[min(100cqw,max(16rem,calc((100cqh-4rem)*var(--shape))))] max-w-none",
+            )}
+          >
             <Button variant="tertiary" size="sm" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
               {playing ? <Pause /> : <Play />}
             </Button>
@@ -933,6 +961,9 @@ export function ReelEditor({
             <span className="shrink-0 text-xs tabular-nums text-gray-900" title={trims.length ? `Cut from ${clock(draft.edit.duration)} recorded` : undefined}>
               {clock(viewTime)} / {clock(view.duration)}
             </span>
+            <Button variant="tertiary" size="sm" onClick={toggleFull} aria-label={full ? "Exit full screen (F)" : "Full screen (F)"} title={full ? "Exit full screen  F" : "Full screen  F"}>
+              {full ? <Minimize /> : <Maximize />}
+            </Button>
           </div>
           {behind && <p className="mx-auto mt-2 max-w-[340px] text-center text-xs text-gray-900">In the video, the big words go behind you.</p>}
         </div>

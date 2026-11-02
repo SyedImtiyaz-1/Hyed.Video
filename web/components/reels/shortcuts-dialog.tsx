@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 /** The editor's keys, as the editor handles them (reel-editor.tsx and the timeline). `mod`: ⌘ on a Mac, Ctrl elsewhere. */
 const KEYS = (mod: string): [string[], string][] => [
   [["Space"], "Play or pause"],
+  [["F"], "Full screen preview (Esc leaves it)"],
   [["←", "→"], "One frame back or forward"],
   [["Shift", "← →"], "One second back or forward"],
   [["↑", "↓"], "Previous or next caption line"],
