@@ -4,7 +4,7 @@
 //   npm run dev:all        → open http://localhost:3001, sign up, make a video
 //
 // Ctrl-C stops everything this script started (the database keeps running in Docker).
-import { execSync, spawn } from "node:child_process";
+import { execSync, spawn, spawnSync } from "node:child_process";
 
 const WEB_PORT = 3001; // 3000 is often taken by other projects
 const RENDER_PORT = 8787; // must match DEV_RENDER_URL in .env
@@ -34,9 +34,13 @@ say("Database ready on localhost:5433.");
 const leftovers = execSync("docker ps -aq --filter name=workerd-hyped-render").toString().trim();
 if (leftovers) execSync(`docker rm -f ${leftovers.split("\n").join(" ")}`, { stdio: "ignore" });
 
+// Windows can only start npm (npm.cmd) through a shell. The commands here are fixed, so one command line is safe.
+const windows = process.platform === "win32";
+
 const children = [];
 function start(name, cmd, args) {
-  const child = spawn(cmd, args, { cwd: new URL("..", import.meta.url), stdio: ["ignore", "pipe", "pipe"], env: process.env });
+  const options = { cwd: new URL("..", import.meta.url), stdio: ["ignore", "pipe", "pipe"], env: process.env, shell: windows };
+  const child = windows ? spawn([cmd, ...args].join(" "), options) : spawn(cmd, args, options);
   const prefix = `${color[name]}[${name}]${color.reset} `;
   const forward = (stream, out) => {
     let buffered = "";
@@ -60,7 +64,8 @@ let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  for (const child of children) child.kill("SIGINT");
+  // On Windows, killing the shell would leave next dev and wrangler running; end the whole process tree instead.
+  for (const child of children) windows ? spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" }) : child.kill("SIGINT");
   setTimeout(() => process.exit(0), 1500);
 }
 process.on("SIGINT", shutdown);

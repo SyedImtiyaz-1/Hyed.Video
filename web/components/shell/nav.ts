@@ -1,12 +1,17 @@
 import { Captions, CreditCard, FolderOpen, Gauge, House, LayoutGrid, Plus, Settings, Shield, type LucideIcon } from "lucide-react";
 import { recipeById } from "@launchreel/core/recipes";
 
-export type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean };
+/** New project: the editor, empty, waiting for a clip (the sidebar's button and the projects grid's tile open it). */
+export const NEW_PROJECT = "/dashboard/edit/new";
 
-// The sidebar's top: Home (the prompt box), the customer's projects (videos and reels together) and the recipes.
+/** A page in the menus. `also`: other pages that belong to it, so its link stays lit there. */
+export type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean; also?: string[] };
+
+// The sidebar's top: Home (the prompt box), the customer's projects (videos and reels together, and the editor on a
+// clip from this computer) and the recipes.
 export const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: House, exact: true },
-  { href: "/dashboard/videos", label: "Projects", icon: FolderOpen },
+  { href: "/dashboard/videos", label: "Projects", icon: FolderOpen, also: ["/dashboard/edit"] },
   { href: "/dashboard/recipes", label: "Templates", icon: LayoutGrid },
 ];
 // The sidebar's foot, under the credits (which open Billing).
@@ -26,6 +31,11 @@ export const ADMIN_NAV = { href: "/dashboard/admin", label: "Admin", icon: Shiel
 
 export function isActive(pathname: string, href: string, exact?: boolean) {
   return exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Whether a menu item is the page being shown: its own page and below, or one of the pages it takes in (`also`). */
+export function navActive(pathname: string, item: NavItem) {
+  return isActive(pathname, item.href, item.exact) || (item.also ?? []).some((href) => isActive(pathname, href));
 }
 
 const TITLES: Record<string, string> = {
