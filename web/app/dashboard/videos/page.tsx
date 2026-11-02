@@ -38,16 +38,8 @@ export default async function VideosPage({ searchParams }: { searchParams: Promi
   return (
     <>
       <AutoRefresh active={jobs.some((j) => j.status === "QUEUED" || j.status === "RUNNING")} />
-      <PageHeader
-        title="Projects"
-        description="Every video, reel and revision you've made, newest first."
-        actions={
-          <ButtonLink href="/dashboard/new" variant="primary">
-            <Plus />
-            New video
-          </ButtonLink>
-        }
-      />
+      {/* No New video here: it's at the top of the sidebar, and the grid starts with a New project tile. */}
+      <PageHeader title="Projects" description="Every video, reel and revision you've made, newest first." />
       <PageBody className="space-y-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <form action="/dashboard/videos" className="w-full lg:max-w-sm">
@@ -59,7 +51,7 @@ export default async function VideosPage({ searchParams }: { searchParams: Promi
           </div>
         </div>
         {jobs.length ? (
-          <ProjectGrid jobs={jobs} newHref={q || status !== "all" ? undefined : "/dashboard/new"} />
+          <ProjectGrid jobs={jobs} newHref={q || status !== "all" ? undefined : "/dashboard/edit/new"} />
         ) : (
           <Card>
             <EmptyState

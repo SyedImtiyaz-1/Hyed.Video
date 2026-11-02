@@ -45,7 +45,7 @@ export default async function Home() {
               <RecipeBrowser />
             </div>
           }
-          projects={<ProjectGrid jobs={recent} newHref="/dashboard/new" />}
+          projects={<ProjectGrid jobs={recent} newHref="/dashboard/edit/new" />}
         />
         <section>
           <SectionTitle>This month</SectionTitle>

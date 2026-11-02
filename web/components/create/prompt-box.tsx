@@ -99,7 +99,15 @@ export function PromptBox({ variant = "hero", cta = "Make my video", shortcuts =
         handClip(chosen.file);
         return router.push("/dashboard/edit/local");
       }
-      if (chosen) await reel.start({ ...REEL_DEFAULTS }, text.trim() || undefined, chosen);
+      if (!chosen) return;
+      const how = await reel.start({ ...REEL_DEFAULTS }, text.trim() || undefined, chosen);
+      // Local development without the render Worker (it takes the uploads): the clip still opens in the editor, straight
+      // from this computer, as in demo mode, and says why. On the live site a failed upload just says so.
+      if (how === "upload-failed" && process.env.NODE_ENV === "development") {
+        setStarting(true);
+        handClip(chosen.file);
+        router.push("/dashboard/edit/local?upload=failed");
+      }
       return;
     }
     const wrong = await keepClip(picked);

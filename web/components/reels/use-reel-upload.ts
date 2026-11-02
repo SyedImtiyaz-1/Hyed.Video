@@ -75,12 +75,17 @@ export function useReelUpload({ credits = Infinity, reelCredits = 0 }: { credits
 
   /**
    * Uploads the picked clip (unless it's already up) and starts the reel. `notes`: what to change, kept for Ask AI.
-   * `chosen`: a clip `choose` just handed back, before its state has landed.
+   * `chosen`: a clip `choose` just handed back, before its state has landed. Says how it went: "started" (on the way to
+   * the editor), "upload-failed" (the clip never got up) or "failed" (anything else, or cancelled); `error` says why.
    */
-  async function start(options: ReelOptions, notes?: string, chosen?: Picked) {
+  async function start(options: ReelOptions, notes?: string, chosen?: Picked): Promise<"started" | "upload-failed" | "failed"> {
     const clip = chosen ?? picked;
-    if (!clip) return setError({ message: "Choose a video to upload." });
+    if (!clip) {
+      setError({ message: "Choose a video to upload." });
+      return "failed";
+    }
     setError(null);
+    let uploading = true;
     try {
       let result = uploaded?.file === clip.file ? uploaded.result : null;
       if (!result) {
@@ -90,6 +95,7 @@ export function useReelUpload({ credits = Infinity, reelCredits = 0 }: { credits
         result = await upload.current.done;
         setUploaded({ file: clip.file, result });
       }
+      uploading = false;
       setPhase("starting");
       const res = await fetch("/api/reels", {
         method: "POST",
@@ -108,11 +114,15 @@ export function useReelUpload({ credits = Infinity, reelCredits = 0 }: { credits
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 404) setUploaded(null); // the upload is gone: send it again next time
-        return setError({ message: data.error ?? "Could not start the reel", upgrade: data.upgrade });
+        setError({ message: data.error ?? "Could not start the reel", upgrade: data.upgrade });
+        return "failed";
       }
       router.push(`/dashboard/videos/${data.id}/edit`);
+      return "started";
     } catch (err) {
-      if ((err as Error).name !== "AbortError") setError({ message: (err as Error).message || "Network error. Try again." }); // cancelled: nothing to say
+      if ((err as Error).name === "AbortError") return "failed"; // cancelled: nothing to say
+      setError({ message: (err as Error).message || "Network error. Try again." });
+      return uploading ? "upload-failed" : "failed";
     } finally {
       upload.current = null;
       setPhase("idle");

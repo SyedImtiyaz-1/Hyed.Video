@@ -1,31 +1,11 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-import { BROLL_LENGTH, chatContext, longestShot, needsFootage, parseChatOps, parseClip, parseLookChanges, parseReel, parseReelEdit, REEL_FONTS, REEL_MAX_FONTS, REEL_STYLES, reelEditable, sameClip, type BrollClip, type ChatOp, type ReelEdit, type ReelFont, type ReelStyle } from "@launchreel/core";
+import { BROLL_LENGTH, chatContext, longestShot, needsFootage, parseChatOps, parseClip, parseReel, parseReelEdit, reelEditable, sameClip, type BrollClip, type ChatOp, type ReelEdit } from "@launchreel/core";
+import { ChatBody as Body, withSelection } from "@/lib/chat-body";
 import { getDb } from "@/lib/db";
 import { demoJobs, isDemo } from "@/lib/demo";
 import { askAssistant, searchStock } from "@/lib/reel-assistant";
 import { readEdit } from "@/lib/reel-edits";
 import { requireUser } from "@/lib/user";
-
-const Body = z.object({
-  message: z.string().trim().min(1).max(1000),
-  time: z.number().min(0).default(0),
-  draft: z.object({
-    options: z.object({
-      style: z.enum(REEL_STYLES as [ReelStyle, ...ReelStyle[]]),
-      look: z.unknown().optional().transform((look) => parseLookChanges(look)),
-      fonts: z
-        .array(z.enum(REEL_FONTS as [ReelFont, ...ReelFont[]]))
-        .min(1)
-        .max(REEL_MAX_FONTS),
-      emojis: z.boolean(),
-      zooms: z.boolean(),
-      sfx: z.boolean(),
-      hook: z.boolean(),
-    }),
-    edit: z.unknown(),
-  }),
-});
 
 // Chat edits are free, but not unlimited: per person, in each Worker instance (a best-effort guard against loops).
 const WINDOW_MS = 10 * 60_000;
@@ -89,7 +69,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!edit) return NextResponse.json({ error: "The reel's edits couldn't be read. Reload the editor and try again." }, { status: 400 });
   const draft = { options: parsed.data.draft.options, edit };
   try {
-    const answer = await askAssistant(chatContext(draft, parsed.data.time), parsed.data.message);
+    const answer = await askAssistant(withSelection(chatContext(draft, parsed.data.time), parsed.data.selection), parsed.data.message);
     if (!answer) return NextResponse.json({ error: "Chat edits aren't available here yet." }, { status: 503 });
     const checked = parseChatOps(answer.ops, edit);
     const { ops, missing } = checked.some(needsFootage) ? await withFootage(checked, edit) : { ops: checked, missing: [] };

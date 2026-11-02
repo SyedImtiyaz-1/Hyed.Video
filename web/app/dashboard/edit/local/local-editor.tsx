@@ -1,15 +1,14 @@
 "use client";
-import { LoaderCircle, Upload } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { REEL_AUDIO_NONE } from "@launchreel/core/music-beds";
 import { parsePicture } from "@launchreel/core/picture";
 import { REEL_DEFAULTS, type ReelEdit } from "@launchreel/core/reel";
-import { CLIP_ACCEPT } from "@/components/create/use-clip";
 import { reelName } from "@/components/reels/labels";
 import { measureVideo } from "@/components/reels/measure";
+import { EmptyWorkspace } from "@/components/reels/empty-workspace";
 import { ReelEditor } from "@/components/reels/reel-editor";
 import { takeClip } from "@/lib/clip-handoff";
-import { cn } from "@/lib/cn";
 import { takePendingClip } from "@/lib/pending-clip";
 
 type Opened = { url: string; name: string; edit: ReelEdit };
@@ -88,10 +87,10 @@ type Hearing = { state: "hearing" } | { state: "done"; words: ReelEdit["words"] 
 export function LocalEditor() {
   const [clip, setClip] = useState<Opened | null>(null);
   const [reading, setReading] = useState(true);
-  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hearing, setHearing] = useState<Hearing | null>(null);
-  const input = useRef<HTMLInputElement>(null);
+  // Sent here because the clip's upload failed (local development without the render Worker: prompt-box.tsx).
+  const [notUploaded, setNotUploaded] = useState(false);
   const started = useRef(false);
 
   async function hear(file: File) {
@@ -127,6 +126,7 @@ export function LocalEditor() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
+    setNotUploaded(new URLSearchParams(window.location.search).get("upload") === "failed");
     const handed = takeClip();
     if (handed) void open(handed);
     else void takePendingClip().then((kept) => (kept ? open(kept.file) : setReading(false)));
@@ -137,59 +137,46 @@ export function LocalEditor() {
     const { style, look, fonts, emojis, zooms, sfx, hook } = REEL_DEFAULTS;
     // Bigger than 1080p plays from the original file here; an uploaded clip gets a lighter preview to edit on.
     const big = clip.edit.width * clip.edit.height > 1920 * 1080 * 1.1;
+    // The notes go inside the editor, under its bar, so it still fits the window with its timeline.
+    const notes = [
+      notUploaded && (
+        <p key="upload" className="truncate rounded-lg border border-amber-400 bg-amber-100 px-3 py-1.5 text-[13px] text-amber-900" role="status" title="Editing and captions work here; Ask AI, B-roll search and Export need the upload.">
+          Your clip couldn&apos;t upload (the local render Worker isn&apos;t running), so it opened from your computer. Ask AI, B-roll search and Export need the upload.
+        </p>
+      ),
+      big && (
+        <p key="big" className="truncate rounded-lg border border-amber-400 bg-amber-100 px-3 py-1.5 text-[13px] text-amber-900" title="Uploaded clips get a lighter preview to edit on.">
+          This clip is {clip.edit.width}×{clip.edit.height}, so it may play slowly here: it plays from the original file.
+        </p>
+      ),
+      hearing && hearing.state !== "done" && (
+        <p key="hearing" className="flex items-center gap-2 rounded-lg border border-gray-alpha-400 px-3 py-1.5 text-[13px] text-gray-900" aria-live="polite">
+          {hearing.state === "hearing" ? (
+            <>
+              <LoaderCircle className="size-3.5 animate-spin" /> Hearing your clip for its captions…
+            </>
+          ) : (
+            hearing.why
+          )}
+        </p>
+      ),
+    ].filter(Boolean);
     return (
-      <>
-        {big && (
-          <p className="mx-4 mt-4 rounded-lg border border-amber-400 bg-amber-100 px-3 py-2 text-[13px] text-amber-900 sm:mx-6">
-            This clip is {clip.edit.width}×{clip.edit.height}, so it may play slowly here: it plays from the original file. Uploaded clips get a lighter preview to edit on.
-          </p>
-        )}
-        {hearing && hearing.state !== "done" && (
-          <p className="mx-4 mt-4 flex items-center gap-2 rounded-lg border border-gray-alpha-400 px-3 py-2 text-[13px] text-gray-900 sm:mx-6" aria-live="polite">
-            {hearing.state === "hearing" ? (
-              <>
-                <LoaderCircle className="size-3.5 animate-spin" /> Hearing your clip for its captions…
-              </>
-            ) : (
-              hearing.why
-            )}
-          </p>
-        )}
-        <ReelEditor
-          jobId="local"
-          name={reelName(clip.name)}
-          options={{ style, look, fonts, emojis, zooms, sfx, hook }}
-          edit={clip.edit}
-          previewUrl={clip.url}
-          initialExport={null}
-          editableUntil={new Date(Date.now() + 7 * 86_400_000).toISOString()}
-          local
-          heard={hearing?.state === "done" ? hearing.words : null}
-        />
-      </>
+      <ReelEditor
+        jobId="local"
+        name={reelName(clip.name)}
+        options={{ style, look, fonts, emojis, zooms, sfx, hook }}
+        edit={clip.edit}
+        previewUrl={clip.url}
+        initialExport={null}
+        editableUntil={new Date(Date.now() + 7 * 86_400_000).toISOString()}
+        local
+        heard={hearing?.state === "done" ? hearing.words : null}
+        notice={notes.length ? notes : undefined}
+      />
     );
   }
 
-  return (
-    <div className="mx-auto w-full max-w-xl px-4 py-16">
-      <input ref={input} type="file" accept={CLIP_ACCEPT} className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => (e.target.files?.[0] && void open(e.target.files[0]), (e.target.value = ""))} />
-      <button
-        type="button"
-        onClick={() => input.current?.click()}
-        onDragOver={(e) => e.dataTransfer.types.includes("Files") && (e.preventDefault(), setDragging(true))}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => (e.preventDefault(), setDragging(false), e.dataTransfer.files?.[0] && void open(e.dataTransfer.files[0]))}
-        className={cn("flex w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-6 py-16 text-center transition-colors", dragging ? "border-brand bg-brand/10" : "border-gray-alpha-500 hover:border-gray-1000")}
-      >
-        {reading ? <LoaderCircle className="size-5 animate-spin text-gray-900" /> : <Upload className="size-5 text-gray-900" />}
-        <span className="text-base font-medium text-gray-1000">{reading ? "Opening your clip…" : "Choose a clip to edit, or drop it here"}</span>
-        <span className="text-[13px] text-gray-900">It opens in the editor straight from your computer. MP4, MOV or WebM.</span>
-      </button>
-      {error && (
-        <p role="alert" className="mt-3 text-center text-[13px] text-red-900">
-          {error}
-        </p>
-      )}
-    </div>
-  );
+  // No clip yet: the editor, empty, as a new project's (a clip picked here opens from this computer, not uploaded).
+  return <EmptyWorkspace onFile={(file) => void open(file)} busy={reading ? "Opening your clip…" : null} error={error} note="It opens in the editor straight from your computer, without uploading." />;
 }

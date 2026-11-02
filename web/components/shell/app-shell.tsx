@@ -11,8 +11,9 @@ import { HERO, posterSrc } from "@/lib/showcase";
 import { LogoMark } from "@/components/logo";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
+import { LinkPending } from "@/components/ui/link-pending";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { ACCOUNT_NAV, ADMIN_NAV, MAIN_NAV, PRIMARY_NAV, breadcrumbs, isActive, type NavItem } from "./nav";
+import { ACCOUNT_NAV, ADMIN_NAV, MAIN_NAV, NEW_PROJECT, PRIMARY_NAV, breadcrumbs, navActive, type NavItem } from "./nav";
 import { LogOutButton } from "./log-out-button";
 import { SearchBox } from "./search-box";
 
@@ -28,6 +29,23 @@ export type ShellProps = {
 };
 
 const COLLAPSE_KEY = "sidebar:collapsed";
+// The editor's pages (a project's editor, a new project, a clip from this computer): full screen, as a desktop editor.
+const EDITOR = /^\/dashboard\/(videos\/[^/]+\/edit|edit\/)/;
+
+/**
+ * Which menu link is lit: the page a click is going to at once (a page can take a moment to arrive), then, once it's
+ * there, the page being shown. A click with a modifier (a new tab) doesn't count.
+ */
+function useLit() {
+  const pathname = usePathname();
+  const [going, setGoing] = useState<string | null>(null);
+  useEffect(() => setGoing(null), [pathname]);
+  const lit = (item: NavItem) => (going ? going === item.href : navActive(pathname, item));
+  const go = (href: string) => (e: React.MouseEvent) => {
+    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) setGoing(href);
+  };
+  return { lit, go };
+}
 
 /**
  * The dashboard's frame: the sidebar on the page's background, and the page itself on a raised, rounded panel beside it.
@@ -52,6 +70,24 @@ export function AppShell(props: ShellProps) {
       return !c;
     });
 
+  const demoBanner = props.demo && (
+    <div className="border-b border-blue-400 bg-blue-100 px-4 py-2 text-center text-[13px] text-blue-900">
+      Demo mode: sample data, nothing is saved.
+      <span className="hidden sm:inline"> Sample videos come from the open-source brag project&apos;s examples.</span>
+    </div>
+  );
+
+  // The editor takes the whole window, nothing over it (Taibanaz, 2 Nov: room for the preview); its bar's back button
+  // leaves it.
+  if (EDITOR.test(pathname)) {
+    return (
+      <div className="flex min-h-dvh flex-col bg-background-100">
+        {demoBanner}
+        <main className="flex-1">{props.children}</main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-dvh bg-background-200">
       <Sidebar {...props} collapsed={collapsed} onToggle={toggle} />
@@ -59,12 +95,7 @@ export function AppShell(props: ShellProps) {
         {/* overflow-clip, not overflow-hidden: it rounds the corners without breaking the top bar's sticky. */}
         <div className="flex min-w-0 flex-1 flex-col overflow-clip bg-background-100 md:rounded-2xl md:border md:border-gray-alpha-400">
           <Topbar demo={props.demo} userSlot={props.userSlot} home={pathname === "/dashboard"} />
-          {props.demo && (
-            <div className="border-b border-blue-400 bg-blue-100 px-4 py-2 text-center text-[13px] text-blue-900">
-              Demo mode: sample data, nothing is saved.
-              <span className="hidden sm:inline"> Sample videos come from the open-source brag project&apos;s examples.</span>
-            </div>
-          )}
+          {demoBanner}
           <main className="flex-1 pb-28 md:pb-0">{props.children}</main>
         </div>
       </div>
@@ -74,7 +105,7 @@ export function AppShell(props: ShellProps) {
 }
 
 function Sidebar({ credits, reelCredits = 0, email, isAdmin, userSlot, demo, collapsed, onToggle }: ShellProps & { collapsed: boolean; onToggle: () => void }) {
-  const pathname = usePathname();
+  const { lit, go } = useLit();
   const lowCredits = credits < 1;
   return (
     <aside className={cn("sticky top-0 z-40 hidden h-dvh shrink-0 flex-col bg-background-200 transition-[width] duration-200 md:flex", collapsed ? "w-[60px]" : "w-[248px]")}>
@@ -95,10 +126,18 @@ function Sidebar({ credits, reelCredits = 0, email, isAdmin, userSlot, demo, col
         </div>
       )}
 
+      {/* A new project, at the top of the sidebar as in desktop apps (an icon when it's collapsed): the empty editor. */}
+      <div className={cn("pt-3", collapsed ? "px-2" : "px-3")}>
+        <ButtonLink href={NEW_PROJECT} onClick={go(NEW_PROJECT)} variant="primary" size="sm" className={cn("w-full", collapsed && "px-0")} title={collapsed ? "New project" : undefined} aria-label={collapsed ? "New project" : undefined}>
+          <Plus />
+          {!collapsed && "New project"}
+        </ButtonLink>
+      </div>
+
       <div className="flex-1 overflow-y-auto px-2 py-3">
         <nav className="space-y-0.5" aria-label="Main">
           {PRIMARY_NAV.map((item) => (
-            <SideLink key={item.href} item={item} active={isActive(pathname, item.href, item.exact)} collapsed={collapsed} />
+            <SideLink key={item.href} item={item} active={lit(item)} onClick={go(item.href)} collapsed={collapsed} />
           ))}
         </nav>
       </div>
@@ -141,9 +180,9 @@ function Sidebar({ credits, reelCredits = 0, email, isAdmin, userSlot, demo, col
           )}
         </Link>
         {ACCOUNT_NAV.map((item) => (
-          <SideLink key={item.href} item={item} active={isActive(pathname, item.href)} collapsed={collapsed} muted />
+          <SideLink key={item.href} item={item} active={lit(item)} onClick={go(item.href)} collapsed={collapsed} muted />
         ))}
-        {isAdmin && <SideLink item={ADMIN_NAV} active={isActive(pathname, ADMIN_NAV.href)} collapsed={collapsed} muted />}
+        {isAdmin && <SideLink item={ADMIN_NAV} active={lit(ADMIN_NAV)} onClick={go(ADMIN_NAV.href)} collapsed={collapsed} muted />}
         <a
           href={`mailto:${BRAND.supportEmail}`}
           title={collapsed ? "Need any help?" : undefined}
@@ -163,10 +202,11 @@ function Sidebar({ credits, reelCredits = 0, email, isAdmin, userSlot, demo, col
   );
 }
 
-function SideLink({ item: { href, label, icon: Icon }, active, collapsed, muted }: { item: NavItem; active: boolean; collapsed: boolean; muted?: boolean }) {
+function SideLink({ item: { href, label, icon: Icon }, active, onClick, collapsed, muted }: { item: NavItem; active: boolean; onClick?: (e: React.MouseEvent) => void; collapsed: boolean; muted?: boolean }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -178,6 +218,12 @@ function SideLink({ item: { href, label, icon: Icon }, active, collapsed, muted 
     >
       <Icon className="size-4 shrink-0" />
       {!collapsed && label}
+      {/* While its page is on the way. */}
+      {!collapsed && (
+        <span className="ml-auto text-gray-900 [&>svg]:size-3.5">
+          <LinkPending />
+        </span>
+      )}
     </Link>
   );
 }
@@ -206,13 +252,7 @@ function Topbar({ demo, userSlot, home }: { demo: boolean; userSlot: React.React
       </nav>
       <div className="ml-auto flex items-center gap-2">
         {demo && <Badge tone="blue">Demo</Badge>}
-        {/* Pages with their own way to start a video, and phones (bottom bar), don't need this one. */}
-        {!["/dashboard", "/dashboard/videos", "/dashboard/new"].includes(pathname) && (
-          <ButtonLink href="/dashboard/new" variant="primary" size="sm" className="hidden md:inline-flex">
-            <Plus />
-            New video
-          </ButtonLink>
-        )}
+        {/* Starting something lives at the top of the sidebar (wide screens) and in the middle of the bottom bar (phones). */}
         {/* Phones have no sidebar: the account menu (profile, log out) lives up here. */}
         <div className="flex size-10 items-center justify-center md:hidden">{userSlot}</div>
       </div>
@@ -224,17 +264,19 @@ function Topbar({ demo, userSlot, home }: { demo: boolean; userSlot: React.React
 const MOBILE = ["/dashboard", "/dashboard/recipes", "/dashboard/new", "/dashboard/videos", "/dashboard/settings"];
 
 function MobileNav() {
-  const pathname = usePathname();
+  const { lit, go } = useLit();
   const items = MOBILE.map((href) => MAIN_NAV.find((i) => i.href === href)).filter((i): i is NavItem => Boolean(i));
   return (
     <nav className="fixed inset-x-0 bottom-4 z-40 mx-auto flex w-fit items-center gap-1 rounded-full border border-gray-alpha-400 bg-background-100/90 p-1.5 shadow-menu backdrop-blur md:hidden" aria-label="Main">
-      {items.map(({ href, label, icon: Icon, exact }) => {
-        const active = isActive(pathname, href, exact);
+      {items.map((item) => {
+        const { href, label, icon: Icon } = item;
+        const active = lit(item);
         const primary = href === "/dashboard/new";
         return (
           <Link
             key={href}
             href={href}
+            onClick={go(href)}
             aria-label={label}
             aria-current={active ? "page" : undefined}
             className={cn(

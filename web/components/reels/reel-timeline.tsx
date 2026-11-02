@@ -1,6 +1,6 @@
 "use client";
-import { Minus, Plus, Scissors, X } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Eye, EyeOff, Minus, Plus, Scissors, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { CaptionLine } from "@launchreel/core/captions";
 import { EFFECTS, effectSpan } from "@launchreel/core/effects";
 import { REEL_MUSIC } from "@launchreel/core/music-beds";
@@ -26,9 +26,16 @@ export type TimelineDrag = { item: TimelineItem; mode: "move" | "start" | "end";
 const TRIM_NAME = { pause: "Pause", filler: "Filler", retake: "Retake", cut: "Cut" } as const;
 
 const LABEL = 64;
-const ZOOMS = [1, 2, 4, 8];
+// 1×: the whole reel fits (Fit); up to 16× closer. The buttons step by half again; the slider is on a log scale.
+const MAX_ZOOM = 16;
+const ZOOM_STEP = 1.5;
+// The ruler's spacing: the closest of these that leaves room for its labels.
+const TICK_STEPS = [0.5, 1, 2, 5, 10, 30, 60];
+const TICK_PX = 56;
 // A press that moves less than this is a click, not a drag.
 const DRAG_PX = 3;
+// Whether empty tracks are hidden, remembered in this browser.
+const HIDE_EMPTY_KEY = "hyped:timeline-hide-empty";
 
 const same = (a: TimelineItem | null | undefined, b: TimelineItem) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -93,15 +100,66 @@ export function ReelTimeline({
   const x = (t: number) => t * perSecond;
   const full = x(duration);
 
-  // Keep the playhead in view while it plays.
+  // Zooming keeps one moment where it is on screen: the pointer's (scrolling with ⌘ or Ctrl, or a trackpad pinch), or
+  // the playhead's (the buttons and the slider; the middle when the playhead is out of view). Fit shows the whole reel.
+  const anchor = useRef<{ t: number; px: number } | null>(null);
+  const zoomTo = (next: number, px?: number) => {
+    const el = box.current;
+    const z = Math.min(MAX_ZOOM, Math.max(1, next));
+    if (!el || z === zoom) return;
+    const head = LABEL + x(time) - el.scrollLeft;
+    const at = px ?? (head > LABEL && head < el.clientWidth ? head : el.clientWidth / 2);
+    anchor.current = { t: Math.max(0, Math.min(duration, (el.scrollLeft + at - LABEL) / perSecond)), px: at };
+    setZoom(z);
+  };
+  useLayoutEffect(() => {
+    const el = box.current;
+    const a = anchor.current;
+    if (!el || !a) return;
+    anchor.current = null;
+    el.scrollLeft = Math.max(0, LABEL + a.t * perSecond - a.px);
+  }, [perSecond]);
+  // React listens to the wheel passively, so it can't stop the page zooming: this listener isn't.
+  const zoomer = useRef(zoomTo);
+  zoomer.current = zoomTo;
+  const zoomNow = useRef(zoom);
+  zoomNow.current = zoom;
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      zoomer.current(zoomNow.current * Math.exp(-e.deltaY * 0.0025), e.clientX - el.getBoundingClientRect().left);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Keep the playhead in view while it plays (not when the scale changes: zooming keeps its own moment in place).
   useEffect(() => {
     const el = box.current;
     if (!el) return;
     const at = LABEL + x(time);
     if (at < el.scrollLeft + LABEL + 16 || at > el.scrollLeft + el.clientWidth - 24) el.scrollLeft = Math.max(0, at - LABEL - el.clientWidth * 0.3);
-    // Only when the time or the scale moves.
+    // Only when the time moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [time, perSecond]);
+  }, [time]);
+
+  const [hideEmpty, setHideEmpty] = useState(true);
+  useEffect(() => {
+    try {
+      setHideEmpty(localStorage.getItem(HIDE_EMPTY_KEY) !== "0");
+    } catch {}
+  }, []);
+  const toggleEmpty = () => {
+    setHideEmpty((h) => {
+      try {
+        localStorage.setItem(HIDE_EMPTY_KEY, h ? "0" : "1");
+      } catch {}
+      return !h;
+    });
+  };
 
   const seeking = useRef(false);
   const timeAt = (e: ReactPointerEvent) => {
@@ -176,8 +234,9 @@ export function ReelTimeline({
     },
   });
 
-  const step = duration > 60 ? 10 : duration > 20 ? 5 : 2;
+  const step = TICK_STEPS.find((s) => x(s) >= TICK_PX) ?? TICK_STEPS[TICK_STEPS.length - 1];
   const ticks = Array.from({ length: Math.floor(duration / step) + 1 }, (_, k) => k * step);
+  const tickLabel = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}${step < 1 ? `.${Math.round((t % 1) * 10)}` : ""}`;
   const piece = (
     item: TimelineItem,
     left: number,
@@ -216,34 +275,26 @@ export function ReelTimeline({
   };
   const shows = showEmojis ? emojiShows(edit, lines) : [];
   const music = edit.audio.music;
-  const tracks: { name: string; items: React.ReactNode[] }[] = [
-    ...(edit.trims.length
-      ? [
-          {
-            name: "Cuts",
-            items: edit.trims.map((t, i) =>
-              piece({ kind: "trim", index: i }, x(t.start), x(t.end) - x(t.start), "bg-red-300 text-red-1000 hover:bg-red-400", `${TRIM_NAME[t.reason]} cut, ${(t.end - t.start).toFixed(1)} s at ${t.start.toFixed(1)} s`, TRIM_NAME[t.reason], { moves: true, start: true, end: true }),
-            ),
-          },
-        ]
-      : []),
+  // Every track this reel can have; the empty ones show only when the customer asks for them (the toggle), Captions always.
+  const all: { name: string; items: React.ReactNode[]; always?: boolean }[] = [
+    {
+      name: "Cuts",
+      items: edit.trims.map((t, i) =>
+        piece({ kind: "trim", index: i }, x(t.start), x(t.end) - x(t.start), "bg-red-300 text-red-1000 hover:bg-red-400", `${TRIM_NAME[t.reason]} cut, ${(t.end - t.start).toFixed(1)} s at ${t.start.toFixed(1)} s`, TRIM_NAME[t.reason], { moves: true, start: true, end: true }),
+      ),
+    },
     {
       name: "Captions",
+      always: true,
       items: lines.map((l) => piece({ kind: "line", word: l.words[0].i }, x(l.start), x(l.end) - x(l.start) - 1, "bg-gray-alpha-300 text-gray-1000 hover:bg-gray-alpha-400", l.text, l.text)),
     },
-    ...(broll.length
-      ? [
-          {
-            name: "B-roll",
-            items: broll.map((b) =>
-              piece({ kind: "broll", index: b.index }, x(b.start), x(b.end) - x(b.start) - 1, "bg-green-300 text-green-1000 hover:bg-green-400", `B-roll: ${b.query || "stock clip"} at ${b.start.toFixed(1)} s`, b.query || "B-roll", { moves: true, start: true, end: true }),
-            ),
-          },
-        ]
-      : []),
-    ...(showZooms && windows.length
-      ? [{ name: "Zooms", items: windows.map((z) => piece({ kind: "zoom", word: z.word ?? 0 }, x(z.start), x(z.end + 0.45) - x(z.start), "bg-blue-300 text-blue-1000 hover:bg-blue-400", `Punch-in at ${z.start.toFixed(1)} s`, "Zoom")) }]
-      : []),
+    {
+      name: "B-roll",
+      items: broll.map((b) =>
+        piece({ kind: "broll", index: b.index }, x(b.start), x(b.end) - x(b.start) - 1, "bg-green-300 text-green-1000 hover:bg-green-400", `B-roll: ${b.query || "stock clip"} at ${b.start.toFixed(1)} s`, b.query || "B-roll", { moves: true, start: true, end: true }),
+      ),
+    },
+    ...(showZooms ? [{ name: "Zooms", items: windows.map((z) => piece({ kind: "zoom", word: z.word ?? 0 }, x(z.start), x(z.end + 0.45) - x(z.start), "bg-blue-300 text-blue-1000 hover:bg-blue-400", `Punch-in at ${z.start.toFixed(1)} s`, "Zoom")) }] : []),
     {
       name: "Effects",
       items: edit.effects.map((e, i) => {
@@ -265,21 +316,46 @@ export function ReelTimeline({
           },
         ]
       : []),
-    ...(music ? [{ name: "Music", items: [piece({ kind: "music" }, 0, full - 1, "bg-pink-200 text-pink-1000 hover:bg-pink-300", `Music: ${REEL_MUSIC[music.track].label}, ${Math.round(music.volume * 100)}%`, `♫ ${REEL_MUSIC[music.track].label} · ${Math.round(music.volume * 100)}%`)] }] : []),
+    { name: "Music", items: music ? [piece({ kind: "music" }, 0, full - 1, "bg-pink-200 text-pink-1000 hover:bg-pink-300", `Music: ${REEL_MUSIC[music.track].label}, ${Math.round(music.volume * 100)}%`, `♫ ${REEL_MUSIC[music.track].label} · ${Math.round(music.volume * 100)}%`)] : [] },
   ];
+  const tracks = hideEmpty ? all.filter((t) => t.always || t.items.length) : all;
+  const hidden = all.length - tracks.length;
 
   return (
     <div className="rounded-lg border border-gray-alpha-400 bg-background-100">
       <div className="flex items-center justify-between gap-3 border-b border-gray-alpha-400 px-3 py-1.5">
         <p className="min-w-0 truncate text-xs text-gray-900">
-          Timeline · drag a piece to move it, its edge to resize · drag across Video to cut a part · Delete removes · Space plays
+          Timeline · drag a piece to move it, its edge to resize · drag across Video to cut a part · <kbd className="font-sans">?</kbd> for shortcuts
         </p>
         <div className="flex shrink-0 items-center gap-1">
-          <button type="button" onClick={() => setZoom((z) => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)])} disabled={zoom === ZOOMS[0]} aria-label="Zoom the timeline out" className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
+          <button
+            type="button"
+            onClick={toggleEmpty}
+            aria-pressed={!hideEmpty}
+            title={hideEmpty ? `Show empty tracks${hidden ? ` (${hidden} hidden)` : ""}` : "Hide empty tracks"}
+            aria-label={hideEmpty ? "Show empty tracks" : "Hide empty tracks"}
+            className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100"
+          >
+            {hideEmpty ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          </button>
+          <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1} title="Fit the whole reel" className="h-7 rounded px-2 text-xs text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
+            Fit
+          </button>
+          <button type="button" onClick={() => zoomTo(zoom / ZOOM_STEP)} disabled={zoom === 1} aria-label="Zoom the timeline out" className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
             <Minus className="size-3.5" />
           </button>
-          <span className="w-7 text-center text-xs tabular-nums text-gray-900">{zoom}×</span>
-          <button type="button" onClick={() => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)])} disabled={zoom === ZOOMS[ZOOMS.length - 1]} aria-label="Zoom the timeline in" className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={Math.log(zoom) / Math.log(MAX_ZOOM)}
+            onChange={(e) => zoomTo(MAX_ZOOM ** Number(e.target.value))}
+            aria-label="Timeline zoom"
+            aria-valuetext={`${zoom.toFixed(1)} times`}
+            className="hidden h-1 w-20 accent-[var(--ds-gray-1000)] sm:block"
+          />
+          <button type="button" onClick={() => zoomTo(zoom * ZOOM_STEP)} disabled={zoom === MAX_ZOOM} aria-label="Zoom the timeline in" className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
             <Plus className="size-3.5" />
           </button>
         </div>
@@ -292,7 +368,7 @@ export function ReelTimeline({
             <div className="relative cursor-pointer touch-none" style={{ width: full }} {...scrub}>
               {ticks.map((t) => (
                 <span key={t} className="absolute top-0 h-full border-l border-gray-alpha-400 pl-1 text-[10px] tabular-nums leading-6 text-gray-900" style={{ left: x(t) }}>
-                  {Math.floor(t / 60)}:{String(Math.floor(t % 60)).padStart(2, "0")}
+                  {tickLabel(t)}
                 </span>
               ))}
             </div>

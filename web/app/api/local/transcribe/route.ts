@@ -1,20 +1,6 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { NextResponse } from "next/server";
 import { bare } from "@launchreel/core/words";
-
-/** The OpenAI key: the process's, or the root .env's (`next dev` runs in web/, and Next reads only web/'s env files). */
-function openaiKey(): string | undefined {
-  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
-  try {
-    const line = readFileSync(resolve(process.cwd(), "..", ".env"), "utf8")
-      .split(/\r?\n/)
-      .find((l) => l.startsWith("OPENAI_API_KEY="));
-    return line?.slice("OPENAI_API_KEY=".length).trim().replace(/^["']|["']$/g, "") || undefined;
-  } catch {
-    return undefined;
-  }
-}
+import { openaiBase, openaiKey } from "@/lib/local-openai";
 
 // OpenAI takes up to 25 MB of audio a request: about 13 minutes of the 16 kHz mono WAV the editor sends.
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -52,7 +38,7 @@ export async function POST(req: Request) {
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "word");
-  const res = await fetch(`${(process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, "")}/audio/transcriptions`, {
+  const res = await fetch(`${openaiBase()}/audio/transcriptions`, {
     method: "POST",
     headers: { authorization: `Bearer ${key}` },
     body: form,

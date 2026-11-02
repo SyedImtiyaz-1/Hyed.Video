@@ -1,4 +1,5 @@
-import { ArrowLeft, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Sparkles } from "lucide-react";
+import { NEW_PROJECT } from "@/components/shell/nav";
 import { ButtonLink } from "@/components/ui/button";
 
 /**
@@ -24,10 +25,14 @@ export function EditorFrame({
   timeline: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <ButtonLink href="/dashboard" variant="tertiary" size="sm" aria-label="Back to the dashboard">
+    // Wide screens: the window's height, as the reel editor (the timeline stays in view).
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:py-3">
+      <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 lg:mb-3">
+        <ButtonLink href="/dashboard" variant="tertiary" size="sm" aria-label="Back to the dashboard" title="Back to the dashboard">
           <ArrowLeft />
+        </ButtonLink>
+        <ButtonLink href={NEW_PROJECT} variant="tertiary" size="sm" aria-label="New project" title="New project">
+          <Plus />
         </ButtonLink>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-medium text-gray-1000">{name}</h1>
@@ -35,20 +40,21 @@ export function EditorFrame({
         </div>
         {actions}
       </div>
-      <div className="grid gap-4 lg:h-[calc(100dvh-15rem)] lg:min-h-[560px] lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,340px)] lg:gap-5">
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,340px)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-x-5 lg:gap-y-3">
         <div className="order-2 min-w-0 lg:order-none lg:overflow-y-auto">
           <p className="mb-3 text-sm font-medium text-gray-1000">Library</p>
           {library}
         </div>
-        <div className="order-1 flex min-w-0 items-center justify-center rounded-xl border border-gray-alpha-400 bg-background-200 p-4 lg:order-none">{stage}</div>
-        <div className="order-3 flex min-w-0 flex-col lg:order-none">
+        <div className="order-1 flex min-w-0 items-center justify-center rounded-xl border border-gray-alpha-400 bg-background-200 p-4 lg:order-none lg:min-h-0 lg:overflow-auto">{stage}</div>
+        {/* Ask AI: the editor's full height, beside the timeline too (the timeline is under the library and the stage). */}
+        <div className="order-3 flex min-w-0 flex-col lg:order-none lg:row-span-2 lg:min-h-0">
           <p className="mb-3 flex items-center gap-1.5 text-sm font-medium text-gray-1000">
             <Sparkles className="size-3.5 text-brand" /> Ask AI
           </p>
           <div className="flex min-h-[200px] flex-1 flex-col">{side}</div>
         </div>
+        <div className="order-4 min-w-0 lg:order-none lg:col-start-1 lg:col-end-3 lg:row-start-2 lg:max-h-[40dvh] lg:overflow-y-auto">{timeline}</div>
       </div>
-      <div className="mt-4">{timeline}</div>
     </div>
   );
 }

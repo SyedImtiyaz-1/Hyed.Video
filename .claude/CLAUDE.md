@@ -30,8 +30,10 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
 - Merged into `launch/caption-styles` (27–28 Oct): PR #6 `launch/landing-refresh` (below), PR #7 `fix/media-r2-errors`
   (serveFile logs R2's error and returns 503 instead of Cloudflare 1101) and PR #9 `launch/dashboard-templates` (below).
   Then PR #10 merged `launch/caption-styles` into `main` (28 Oct): `main` has everything as of that day. New PRs still
-  go to `launch/caption-styles` (Taibanaz, 29 Oct). Open for review: `fix/open-dashboard-link` (a spinner on the
-  landing page's dashboard buttons while the dashboard loads; Turbopack for demo mode).
+  go to `launch/caption-styles` (Taibanaz, 29 Oct). PR #11 `fix/open-dashboard-link` (a spinner on the landing page's
+  dashboard buttons; Turbopack for demo mode; the template modal on phones) merged, then PR #12 merged
+  `launch/caption-styles` into `main` again (29 Oct). The 29–30 Oct work below (landing vs dashboard, Editor first part A,
+  E1, the local editor) is pushed on `launch/realtime-editor` (30 Oct), with no PR yet.
 - PR #6, `launch/landing-refresh` (27 Oct): a Cardboard-style landing page (full-screen hero
   with a prompt box: link + words + recipe menu + clip upload, "Auto" picks a recipe in `web/lib/prompt.ts`; floating
   sample tiles; a timeline ruler; the recipes gallery right below; then the examples strip, feature bento, pricing) and Recipes M1 (`packages/core/src/recipes.ts`, `/recipes`,
@@ -42,7 +44,9 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   strip, then "Pick a template to remix" with search, Short/Long-form, sizes, types, a row per category) and Your
   projects (a grid), then this month's numbers. Decisions (Taibanaz, 28 Oct): the dashboard UI says "Templates", not
   "Recipes" (text only: URLs, code and the public site still say recipes); the sidebar is Home, Projects (videos and
-  reels in one grid at `/dashboard/videos`), Templates, with credits, Usage, Settings and help at its foot; the
+  reels in one grid at `/dashboard/videos`), Templates, with credits, Usage, Settings and help at its foot, and New
+  project at its top under search, as Cardboard's app has it (Taibanaz, 2 Nov; no longer in the top bar or the
+  Projects page's header); a click lights its link at once, with a spinner until the page is in; the
   dashboard is dark until the customer picks a theme; a template opens in a modal over the page
   (`web/components/recipes/recipe-modal.tsx`, `?recipe=` in the address), and its page stays for links; the strip's
   first tile is "Upload a clip" (to the reel form) until "make it like this" exists.
@@ -76,9 +80,34 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   editor at once, from their computer (`/dashboard/edit/local`, the editor's `local` mode, a blank edit): in demo mode
   the prompt box hands clips there in memory; its captions follow in seconds (Taibanaz, 30 Oct): the browser sends the
   sound as 16 kHz WAV to `/api/local/transcribe` (local development only, whisper-1 with the root .env's OpenAI key,
-  as the pipeline does). Ask AI, B-roll search and Export need the clip uploaded. The editor's
+  as the pipeline does). Ask AI works on it too in local development (Taibanaz, 2 Nov): `/api/local/chat` makes the
+  render Worker's ReelAssistant call itself (the plan's small model, CHAT_SYSTEM, the reel_chat schema, the root .env's
+  key; the request body shared with the real route in `web/lib/chat-body.ts`), checks the changes the same way, and
+  leaves out stock B-roll (searched by the render Worker). `/api/local/*` is signed-in only (middleware) and 404s in
+  production. B-roll search and Export still need the clip uploaded. The editor's
   preview now has the reel's own shape (the render keeps the clip's), not always 9:16. Next: the same instant open on a
   real account, while the upload and the first cut run, then merging the two.
+- Fully like Cardboard (Taibanaz, 2 Nov; not committed yet): the editor's pages (`/dashboard/videos/[id]/edit`,
+  `/dashboard/edit/*`) take the whole window, without the sidebar or anything over them (a strip of open projects'
+  tabs was tried, then removed the same day for a bigger preview: the bar's back button leaves the editor).
+  New project (the sidebar's button, the projects grid's tile, the + beside the editor bar's back button) opens an empty editor at
+  `/dashboard/edit/new` ("Your timeline is empty", Import media, drop, Ctrl+I): a clip imported there goes where the
+  prompt box sends one (uploaded and started; demo mode, or local development when the upload fails, opens it from
+  the computer). The 5-step form (`/dashboard/new`) stays, for websites, from the phones' bottom bar and Projects' empty
+  state. Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
+- Syed's editor spec ("Video Editor Prompt", Slack 29 Oct: a four-zone workspace, phase 1), the parts added on
+  `launch/realtime-editor` (2 Nov, not committed yet): a Media tab (`media-panel.tsx`); Ask AI answers list what they
+  changed with Undo this for that answer alone (`chat-steps.ts`), the box shows "At 0:12 · what's picked" and sends the
+  pick to `/api/reels/[id]/chat` (`selection`, added to the context in the web route; core and render unchanged); the
+  draft autosaves in the browser (`hyped:reel-draft:<job>`, back on reopen until exported) with Saved / Saving… in the
+  bar; an aspect chip; the timeline zooms with a slider, Fit and ⌘/Ctrl+wheel around the pointer, its ruler adapts, and
+  empty tracks hide (a toggle); keys: a frame per arrow, ↑/↓ caption lines, ⌘E, ⌘/, [ and ], ? for the list
+  (`shortcuts-dialog.tsx`); the editor fills the window and never scrolls as a page (2 Nov: the bar and the timeline
+  keep their height, the panels and the preview take the rest, the preview sized to its column with container units;
+  the same for the empty editor and the first cut's frame). Still to do from the spec: an editable name, play
+  controls and a resizable height in the timeline's header, 120px track labels with icons, panel headers with search,
+  the 1024–1279px drawer and the phone layout's bottom tab bar, screenshots at three sizes. His spec names files that
+  aren't on GitHub (`transitions-panel.tsx`, `template-gallery.tsx`): his Mac work still needs pushing.
 
 ## Local development
 - macOS: `npm run dev:all` (database, render Worker on 8787, site on 3001). See `LOCAL_TESTING.md`.
