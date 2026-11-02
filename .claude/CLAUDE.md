@@ -46,7 +46,9 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   "Recipes" (text only: URLs, code and the public site still say recipes); the sidebar is Home, Projects (videos and
   reels in one grid at `/dashboard/videos`), Templates, with credits, Usage, Settings and help at its foot, and New
   project at its top under search, as Cardboard's app has it (Taibanaz, 2 Nov; no longer in the top bar or the
-  Projects page's header); a click lights its link at once, with a spinner until the page is in; the
+  Projects page's header); a click lights its link at once, with a spinner until the page is in; on the home, the
+  lit link follows the scroll as Cardboard's does (Templates or Projects, by the open tab, once the lower card is
+  reached; `components/shell/home-section.ts`), and Home clicked there scrolls back up; the
   dashboard is dark until the customer picks a theme; a template opens in a modal over the page
   (`web/components/recipes/recipe-modal.tsx`, `?recipe=` in the address), and its page stays for links; the strip's
   first tile is "Upload a clip" (to the reel form) until "make it like this" exists.

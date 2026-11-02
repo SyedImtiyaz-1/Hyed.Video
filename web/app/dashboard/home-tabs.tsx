@@ -1,11 +1,14 @@
 "use client";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGalleryFilter } from "@/components/recipes/gallery-filter";
+import { setHomeSection } from "@/components/shell/home-section";
 import { cn } from "@/lib/cn";
 
 type Tab = "recipes" | "projects";
+// The card counts as reached once its top is in the upper two fifths of the window.
+const REACHED = 0.4;
 
 /**
  * The dashboard home's lower card: recipes to remix and the customer's own projects (videos and reels), behind a pill
@@ -18,13 +21,34 @@ export function HomeTabs({ recipes, projects }: { recipes: React.ReactNode; proj
   useEffect(() => {
     if (filter?.jump) setTab("recipes");
   }, [filter?.jump]);
+  // Scrolled down to this card, the sidebar lights Templates or Projects (whichever tab is open); back up, Home.
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      const top = card.current?.getBoundingClientRect().top ?? Infinity;
+      setHomeSection(top < window.innerHeight * REACHED ? (tab === "projects" ? "projects" : "templates") : "home");
+    };
+    const onScroll = () => (frame ||= requestAnimationFrame(check));
+    check();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [tab]);
+  // Leaving the home: nothing of it is lit any more.
+  useEffect(() => () => setHomeSection("home"), []);
   const tabs: { id: Tab; label: string; all: string }[] = [
     { id: "recipes", label: "Templates", all: "/dashboard/recipes" },
     { id: "projects", label: "Your projects", all: "/dashboard/videos" },
   ];
   const current = tabs.find((t) => t.id === tab)!;
   return (
-    <div className="rounded-2xl border border-gray-alpha-400 bg-background-200/60 p-4 md:p-8">
+    <div ref={card} className="rounded-2xl border border-gray-alpha-400 bg-background-200/60 p-4 md:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div role="tablist" aria-label="Home" className="inline-flex items-center gap-0.5 rounded-full border border-gray-alpha-400 bg-background-100 p-1">
           {tabs.map((t) => (

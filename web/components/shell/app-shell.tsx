@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { LinkPending } from "@/components/ui/link-pending";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { useHomeSection } from "./home-section";
 import { ACCOUNT_NAV, ADMIN_NAV, MAIN_NAV, NEW_PROJECT, PRIMARY_NAV, breadcrumbs, navActive, type NavItem } from "./nav";
 import { LogOutButton } from "./log-out-button";
 import { SearchBox } from "./search-box";
@@ -34,15 +35,27 @@ const EDITOR = /^\/dashboard\/(videos\/[^/]+\/edit|edit\/)/;
 
 /**
  * Which menu link is lit: the page a click is going to at once (a page can take a moment to arrive), then, once it's
- * there, the page being shown. A click with a modifier (a new tab) doesn't count.
+ * there, the page being shown; on the dashboard home, the part of it scrolled to (Templates or Projects once its lower
+ * card is reached, as Cardboard's sidebar follows its page). A click with a modifier (a new tab) doesn't count; Home
+ * clicked on the home scrolls back to its top.
  */
 function useLit() {
   const pathname = usePathname();
+  const section = useHomeSection();
   const [going, setGoing] = useState<string | null>(null);
   useEffect(() => setGoing(null), [pathname]);
-  const lit = (item: NavItem) => (going ? going === item.href : navActive(pathname, item));
+  const lit = (item: NavItem) => {
+    if (going) return going === item.href;
+    if (pathname === "/dashboard" && section !== "home") return item.href === (section === "templates" ? "/dashboard/recipes" : "/dashboard/videos");
+    return navActive(pathname, item);
+  };
   const go = (href: string) => (e: React.MouseEvent) => {
-    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) setGoing(href);
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (href === pathname) {
+      if (href === "/dashboard") window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setGoing(href);
   };
   return { lit, go };
 }
