@@ -22,7 +22,7 @@ RUN npm install -g --no-audit --no-fund @openai/codex@0.157.1
 # The model is pinned by version and checksum.
 RUN apt-get update && apt-get install -y --no-install-recommends python3-venv && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/segment \
-    && /opt/segment/bin/pip install --no-cache-dir ai-edge-litert==2.2.0 \
+    && /opt/segment/bin/pip install --no-cache-dir --default-timeout=120 --retries 10 ai-edge-litert==2.2.0 \
     && mkdir -p /app/models \
     && /opt/segment/bin/python -c "import urllib.request; urllib.request.urlretrieve('https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite', '/app/models/selfie_multiclass_256x256.tflite')" \
     && echo "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0  /app/models/selfie_multiclass_256x256.tflite" | sha256sum -c -
