@@ -3,7 +3,7 @@ import { ArrowUpRight, MessageCircle, PanelLeft, Play, Plus, Zap } from "lucide-
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { BRAND } from "@/lib/brand";
 import { plural } from "@/lib/format";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { LinkPending } from "@/components/ui/link-pending";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { useHomeSection } from "./home-section";
+import { goToHomeSection, useHomeSection, type HomeSection } from "./home-section";
 import { ACCOUNT_NAV, ADMIN_NAV, MAIN_NAV, NEW_PROJECT, PRIMARY_NAV, breadcrumbs, navActive, type NavItem } from "./nav";
 import { LogOutButton } from "./log-out-button";
 import { SearchBox } from "./search-box";
@@ -30,6 +30,10 @@ export type ShellProps = {
 };
 
 const COLLAPSE_KEY = "sidebar:collapsed";
+// How long the sidebar's highlight takes to slide from one link to the next: slow enough to be seen on its way.
+const SLIDE_MS = 450;
+// The menu links that are also parts of the home (it shows the templates and the projects in its lower card).
+const HOME_PARTS: Record<string, HomeSection> = { "/dashboard": "home", "/dashboard/recipes": "templates", "/dashboard/videos": "projects" };
 // The editor's pages (a project's editor, a new project, a clip from this computer): full screen, as a desktop editor.
 const EDITOR = /^\/dashboard\/(videos\/[^/]+\/edit|edit\/)/;
 
@@ -51,10 +55,14 @@ function useLit() {
   };
   const go = (href: string) => (e: React.MouseEvent) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (href === pathname) {
-      if (href === "/dashboard") window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
+    // On the home, its own parts are scrolled to, not opened as pages: Home goes to the top, Templates and Projects to
+    // the lower card on that tab ("View all" on the card still opens their pages).
+    if (pathname === "/dashboard") {
+      const part = HOME_PARTS[href];
+      if (part && goToHomeSection(part)) return e.preventDefault();
+      if (href === pathname) return window.scrollTo({ top: 0, behavior: "smooth" });
     }
+    if (href === pathname) return;
     setGoing(href);
   };
   return { lit, go };
@@ -148,11 +156,7 @@ function Sidebar({ credits, reelCredits = 0, email, isAdmin, userSlot, demo, col
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-3">
-        <nav className="space-y-0.5" aria-label="Main">
-          {PRIMARY_NAV.map((item) => (
-            <SideLink key={item.href} item={item} active={lit(item)} onClick={go(item.href)} collapsed={collapsed} />
-          ))}
-        </nav>
+        <PrimaryNav lit={lit} go={go} collapsed={collapsed} />
       </div>
 
       <div className="space-y-0.5 p-3">
@@ -215,18 +219,63 @@ function Sidebar({ credits, reelCredits = 0, email, isAdmin, userSlot, demo, col
   );
 }
 
-function SideLink({ item: { href, label, icon: Icon }, active, onClick, collapsed, muted }: { item: NavItem; active: boolean; onClick?: (e: React.MouseEvent) => void; collapsed: boolean; muted?: boolean }) {
+/**
+ * Home, Projects and Templates, with one highlight under the lit link that slides to the next one (as Cardboard's
+ * sidebar does) instead of jumping, whether a click or the home's scroll moved it. Measured after each render, so it
+ * follows the sidebar opening and closing too; the first placement doesn't slide.
+ */
+function PrimaryNav({ lit, go, collapsed }: { lit: (item: NavItem) => boolean; go: (href: string) => (e: React.MouseEvent) => void; collapsed: boolean }) {
+  const nav = useRef<HTMLElement>(null);
+  const on = PRIMARY_NAV.find(lit)?.href ?? null;
+  const [mark, setMark] = useState<{ top: number; height: number; shown: boolean; slide: boolean }>({ top: 0, height: 0, shown: false, slide: false });
+  // While it slides it's a shade stronger, with an edge, so the eye catches it on its way; it settles once there.
+  const [moving, setMoving] = useState(false);
+  const placed = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const link = on ? nav.current?.querySelector<HTMLElement>(`[data-href="${on}"]`) : null;
+    if (!link) return setMark((m) => ({ ...m, shown: false }));
+    const slide = placed.current !== null;
+    if (slide && placed.current !== link.offsetTop) setMoving(true);
+    placed.current = link.offsetTop;
+    setMark({ top: link.offsetTop, height: link.offsetHeight, shown: true, slide });
+  }, [on, collapsed]);
+  useEffect(() => {
+    if (!moving) return;
+    const settle = setTimeout(() => setMoving(false), SLIDE_MS);
+    return () => clearTimeout(settle);
+  }, [moving, mark.top]);
+  return (
+    <nav ref={nav} className="relative space-y-0.5" aria-label="Main">
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-0 rounded-md",
+          moving ? "bg-gray-alpha-400 ring-1 ring-gray-alpha-500" : "bg-gray-alpha-300",
+          mark.slide && "transition-[transform,height,opacity,background-color,box-shadow] ease-out",
+        )}
+        style={{ transform: `translateY(${mark.top}px)`, height: mark.height, opacity: mark.shown ? 1 : 0, transitionDuration: `${SLIDE_MS}ms` }}
+      />
+      {PRIMARY_NAV.map((item) => (
+        <SideLink key={item.href} item={item} active={lit(item)} onClick={go(item.href)} collapsed={collapsed} slides />
+      ))}
+    </nav>
+  );
+}
+
+/** A menu link. `slides`: its highlight is PrimaryNav's sliding one, not its own background. */
+function SideLink({ item: { href, label, icon: Icon }, active, onClick, collapsed, muted, slides }: { item: NavItem; active: boolean; onClick?: (e: React.MouseEvent) => void; collapsed: boolean; muted?: boolean; slides?: boolean }) {
   return (
     <Link
       href={href}
       onClick={onClick}
+      data-href={href}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-2.5 rounded-md px-2 transition-colors",
+        "relative flex items-center gap-2.5 rounded-md px-2 transition-colors",
         muted ? "h-8 text-[13px]" : "h-9 text-sm",
         collapsed && "justify-center px-0",
-        active ? "bg-gray-alpha-200 font-medium text-gray-1000" : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
+        active ? cn("font-medium text-gray-1000", !slides && "bg-gray-alpha-200") : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
       )}
     >
       <Icon className="size-4 shrink-0" />

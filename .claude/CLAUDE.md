@@ -48,7 +48,9 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   project at its top under search, as Cardboard's app has it (Taibanaz, 2 Nov; no longer in the top bar or the
   Projects page's header); a click lights its link at once, with a spinner until the page is in; on the home, the
   lit link follows the scroll as Cardboard's does (Templates or Projects, by the open tab, once the lower card is
-  reached; `components/shell/home-section.ts`), and Home clicked there scrolls back up; the
+  reached or the page's foot; `components/shell/home-section.ts`), and the other way Home, Templates and Projects
+  clicked there scroll to their part (the card on that tab; its "View all" opens the pages); the highlight slides from
+  link to link, a shade stronger while it moves (Taibanaz, 2 Nov); the
   dashboard is dark until the customer picks a theme; a template opens in a modal over the page
   (`web/components/recipes/recipe-modal.tsx`, `?recipe=` in the address), and its page stays for links; the strip's
   first tile is "Upload a clip" (to the reel form) until "make it like this" exists.

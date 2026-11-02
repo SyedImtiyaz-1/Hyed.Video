@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useGalleryFilter } from "@/components/recipes/gallery-filter";
-import { setHomeSection } from "@/components/shell/home-section";
+import { onGoToHomeSection, setHomeSection } from "@/components/shell/home-section";
 import { cn } from "@/lib/cn";
 
 type Tab = "recipes" | "projects";
@@ -21,14 +21,20 @@ export function HomeTabs({ recipes, projects }: { recipes: React.ReactNode; proj
   useEffect(() => {
     if (filter?.jump) setTab("recipes");
   }, [filter?.jump]);
-  // Scrolled down to this card, the sidebar lights Templates or Projects (whichever tab is open); back up, Home.
+  // Scrolled down to this card, the sidebar lights Templates or Projects (whichever tab is open); back up, Home. The
+  // card counts as reached at the page's foot too, when the page is too short for it to rise that far.
   const card = useRef<HTMLDivElement>(null);
+  // While a scroll the sidebar asked for runs, the part it asked for stays lit (no flicker back to Home on the way).
+  const steering = useRef(0);
   useEffect(() => {
     let frame = 0;
     const check = () => {
       frame = 0;
+      if (Date.now() < steering.current) return;
       const top = card.current?.getBoundingClientRect().top ?? Infinity;
-      setHomeSection(top < window.innerHeight * REACHED ? (tab === "projects" ? "projects" : "templates") : "home");
+      const foot = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      const reached = top < window.innerHeight * REACHED || (foot && top < window.innerHeight);
+      setHomeSection(reached ? (tab === "projects" ? "projects" : "templates") : "home");
     };
     const onScroll = () => (frame ||= requestAnimationFrame(check));
     check();
@@ -40,6 +46,17 @@ export function HomeTabs({ recipes, projects }: { recipes: React.ReactNode; proj
       window.removeEventListener("resize", onScroll);
     };
   }, [tab]);
+  // The sidebar's Templates or Projects, clicked on the home: that tab, scrolled to (Home: back to the top).
+  useEffect(
+    () =>
+      onGoToHomeSection((section) => {
+        steering.current = Date.now() + 900;
+        if (section === "home") return window.scrollTo({ top: 0, behavior: "smooth" });
+        setTab(section === "projects" ? "projects" : "recipes");
+        card.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }),
+    [],
+  );
   // Leaving the home: nothing of it is lit any more.
   useEffect(() => () => setHomeSection("home"), []);
   const tabs: { id: Tab; label: string; all: string }[] = [
@@ -48,7 +65,7 @@ export function HomeTabs({ recipes, projects }: { recipes: React.ReactNode; proj
   ];
   const current = tabs.find((t) => t.id === tab)!;
   return (
-    <div ref={card} className="rounded-2xl border border-gray-alpha-400 bg-background-200/60 p-4 md:p-8">
+    <div ref={card} className="scroll-mt-4 rounded-2xl border border-gray-alpha-400 bg-background-200/60 p-4 md:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div role="tablist" aria-label="Home" className="inline-flex items-center gap-0.5 rounded-full border border-gray-alpha-400 bg-background-100 p-1">
           {tabs.map((t) => (
