@@ -31,13 +31,14 @@ export function EditorFrame({
         <ButtonLink href="/dashboard" variant="tertiary" size="sm" aria-label="Back to the dashboard" title="Back to the dashboard">
           <ArrowLeft />
         </ButtonLink>
-        <ButtonLink href={NEW_PROJECT} variant="tertiary" size="sm" aria-label="New project" title="New project">
-          <Plus />
-        </ButtonLink>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-medium text-gray-1000">{name}</h1>
           <p className="truncate text-xs text-gray-900">{detail}</p>
         </div>
+        <ButtonLink href={NEW_PROJECT} variant="secondary" size="sm" title="Start a new project in an empty editor" aria-label="New project">
+          <Plus />
+          <span className="hidden sm:inline">New project</span>
+        </ButtonLink>
         {actions}
       </div>
       <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,340px)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-x-5 lg:gap-y-3">

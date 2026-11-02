@@ -90,7 +90,7 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
 - Fully like Cardboard (Taibanaz, 2 Nov; in PR #13): the editor's pages (`/dashboard/videos/[id]/edit`,
   `/dashboard/edit/*`) take the whole window, without the sidebar or anything over them (a strip of open projects'
   tabs was tried, then removed the same day for a bigger preview: the bar's back button leaves the editor).
-  New project (the sidebar's button, the projects grid's tile, the + beside the editor bar's back button) opens an empty editor at
+  New project (the sidebar's button, the projects grid's tile, the New project button in the editor's bar) opens an empty editor at
   `/dashboard/edit/new` ("Your timeline is empty", Import media, drop, Ctrl+I): a clip imported there goes where the
   prompt box sends one (uploaded and started; demo mode, or local development when the upload fails, opens it from
   the computer). The 5-step form (`/dashboard/new`) stays, for websites, from the phones' bottom bar and Projects' empty

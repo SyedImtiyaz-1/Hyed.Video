@@ -779,14 +779,11 @@ export function ReelEditor({
     // Wide screens: the editor fills the window and never scrolls as a page: the bar and the timeline keep their
     // height, the panels and the preview take the rest (only panels scroll inside).
     <div className="mx-auto flex w-full max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:py-3">
-      {/* The bar: back, a new project, name, where the edits are kept, the reel's shape; the panels, the keys, undo and
-          redo, export. */}
+      {/* The bar: back, name, where the edits are kept; a new project (named, as Cardboard's buttons are), the reel's
+          shape, the keys, undo and redo, export. */}
       <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 lg:mb-3">
         <ButtonLink href={local ? "/dashboard" : `/dashboard/videos/${jobId}`} variant="tertiary" size="sm" aria-label={local ? "Back to the dashboard" : "Back to the reel"} title={local ? "Back to the dashboard" : "Back to the reel"}>
           <ArrowLeft />
-        </ButtonLink>
-        <ButtonLink href={NEW_PROJECT} variant="tertiary" size="sm" aria-label="New project" title="New project">
-          <Plus />
         </ButtonLink>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-medium text-gray-1000">Edit reel</h1>
@@ -806,6 +803,10 @@ export function ReelEditor({
             )}
           </p>
         </div>
+        <ButtonLink href={NEW_PROJECT} variant="secondary" size="sm" title="Start a new project in an empty editor" aria-label="New project">
+          <Plus />
+          <span className="hidden sm:inline">New project</span>
+        </ButtonLink>
         <span className="hidden rounded-md border border-gray-alpha-400 px-2 py-0.5 text-xs tabular-nums text-gray-900 sm:inline" title="The reel's shape (it keeps your clip's)">
           {shapeName(draft.edit.width, draft.edit.height)}
         </span>
