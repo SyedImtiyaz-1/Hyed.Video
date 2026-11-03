@@ -6,7 +6,14 @@ import { cn } from "@/lib/cn";
 /** A message: what the customer asked, or the assistant's answer with what it changed (`step`: the editor's id for it). */
 export type ChatMessage = { from: "you" | "ai"; text: string; changes?: string[]; step?: number; failed?: boolean };
 
-const SUGGESTIONS = ["Yellow captions with a pink highlight", "Two words at a time, a bit higher", "Cut the long pauses", "Add B-roll of a laptop here", "Black and white, but subtle", "A flash on every cut", "Calm music, quieter"];
+/** What the panel says before the first message: a title, a line, and requests to send with a click. */
+export type ChatIntro = { title: string; text: string; suggestions: readonly string[] };
+
+const EDIT_INTRO: ChatIntro = {
+  title: "Tell it what to change",
+  text: "Anything the editor can do: caption words, colours, fonts and size, cuts, emojis, punch-ins, sounds, effects, music, B-roll, the hook or the look. Pick something on the timeline first to ask about just that. You can undo each answer.",
+  suggestions: ["Yellow captions with a pink highlight", "Two words at a time, a bit higher", "Cut the long pauses", "Add B-roll of a laptop here", "Black and white, but subtle", "A flash on every cut", "Calm music, quieter"],
+};
 // The box grows with what's typed, up to this many lines, then scrolls.
 const MAX_LINES = 6;
 
@@ -15,8 +22,10 @@ const MAX_LINES = 6;
  * this (it takes back that answer alone; `canUndo` says whether there's anything left to take back). Nothing is saved
  * until export. `draft`: a request typed in beforehand, waiting to be sent. `context`: what the assistant will look at
  * (the playhead, what's selected), shown over the box. `fill`: as tall as its column, the messages taking the room.
+ * `intro` and `placeholder`: for a panel that asks about something else (a new project's, before its clip); `footer`:
+ * anything under an answer (an offer to act, which the customer clicks: the assistant never acts on its own).
  */
-export function ChatPanel({
+export function ChatPanel<M extends ChatMessage>({
   messages,
   busy,
   onSend,
@@ -26,16 +35,22 @@ export function ChatPanel({
   context,
   inputRef,
   fill,
+  intro = EDIT_INTRO,
+  placeholder = "Make the captions bigger and add a whoosh when I say pricing",
+  footer,
 }: {
-  messages: ChatMessage[];
+  messages: M[];
   busy: boolean;
   onSend: (text: string) => void;
-  onUndo: (message: ChatMessage) => void;
-  canUndo: (message: ChatMessage) => boolean;
+  onUndo: (message: M) => void;
+  canUndo: (message: M) => boolean;
   draft?: string;
   context?: string;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   fill?: boolean;
+  intro?: ChatIntro;
+  placeholder?: string;
+  footer?: (message: M) => React.ReactNode;
 }) {
   const [text, setText] = useState(draft ?? "");
   const list = useRef<HTMLDivElement>(null);
@@ -66,11 +81,11 @@ export function ChatPanel({
           <div>
             <p className="flex items-center gap-1.5 text-sm font-medium text-gray-1000">
               <Sparkles className="size-3.5" />
-              Tell it what to change
+              {intro.title}
             </p>
-            <p className="mt-0.5 text-[13px] text-gray-900">Anything the editor can do: caption words, colours, fonts and size, cuts, emojis, punch-ins, sounds, effects, music, B-roll, the hook or the look. Pick something on the timeline first to ask about just that. You can undo each answer.</p>
+            <p className="mt-0.5 text-[13px] text-gray-900">{intro.text}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {SUGGESTIONS.map((s) => (
+              {intro.suggestions.map((s) => (
                 <button key={s} type="button" onClick={() => send(s)} disabled={busy} className="h-8 rounded-full border border-gray-alpha-400 px-3 text-[13px] text-gray-1000 hover:bg-gray-alpha-100 disabled:opacity-50">
                   {s}
                 </button>
@@ -102,6 +117,7 @@ export function ChatPanel({
                     )}
                   </>
                 )}
+                {m.from === "ai" && footer?.(m)}
               </div>
             </div>
           ))
@@ -134,7 +150,7 @@ export function ChatPanel({
             }}
             rows={2}
             maxLength={1000}
-            placeholder="Make the captions bigger and add a whoosh when I say pricing"
+            placeholder={placeholder}
             aria-label="What to change"
             className="min-h-[44px] flex-1 resize-none bg-transparent px-1.5 py-1 text-sm text-gray-1000 outline-none placeholder:text-gray-900"
           />

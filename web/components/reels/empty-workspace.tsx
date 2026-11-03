@@ -1,20 +1,73 @@
 "use client";
 import { ArrowLeft, FolderOpen, LoaderCircle, Plus, Sparkles, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { PickFolder } from "@launchreel/core/project-chat";
 import { CLIP_ACCEPT } from "@/components/create/use-clip";
 import { Button, ButtonLink } from "@/components/ui/button";
+import type { HandedChat } from "@/lib/clip-handoff";
 import { cn } from "@/lib/cn";
+import { ChatPanel, type ChatIntro, type ChatMessage } from "./chat-panel";
+
+/** An answer, with the folder it offers to pick the clip from. */
+type Said = ChatMessage & { pick?: PickFolder };
+
+const FOLDERS: Record<PickFolder, string> = { downloads: "Downloads", desktop: "Desktop", videos: "Videos", documents: "Documents", pictures: "Pictures", music: "Music", any: "" };
+
+const INTRO: ChatIntro = {
+  title: "Ask before your clip is in",
+  text: "Ask what Hyped can do, have it open a folder to pick your clip from, or say how you want it edited: that waits in this box until the clip is in, for you to send. It answers; it never does anything on its own.",
+  suggestions: ["Pull my video from Downloads", "What can you do?", "Yellow captions, and cut the long pauses", "Which files can I import?"],
+};
+
+// The browser's file picker, opening in a folder (Chrome and Edge); elsewhere the file input, wherever it opens.
+type OpenPicker = (options: { startIn?: string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<{ getFile(): Promise<File> }[]>;
+const VIDEO_TYPES = [{ description: "Video", accept: { "video/mp4": [".mp4", ".m4v"], "video/quicktime": [".mov"], "video/webm": [".webm"] } }];
 
 /**
  * A new project before it has anything in it, in the editor's own layout (as Cardboard's empty editor): the library
- * (+ Add), the stage ("Your timeline is empty", Import media), Ask AI waiting for a clip, an empty timeline. A clip can
- * be dropped anywhere on it, or picked with Import media, Add or ⌘I / Ctrl+I; `onFile` does the rest. `busy`: what's
- * happening to the clip (opening, uploading). `note`: what importing does (it may spend a credit).
+ * (+ Add), the stage ("Your timeline is empty", Import media), Ask AI, an empty timeline. A clip can be dropped anywhere
+ * on it, or picked with Import media, Add or ⌘I / Ctrl+I; `onFile` does the rest, with what was said to Ask AI before
+ * it. Ask AI answers from the start (/api/projects/chat): asked to pull a video from Downloads, it offers a button that
+ * opens the picker there; an edit asked for now waits for the clip. `busy`: what's happening to the clip (opening,
+ * uploading). `note`: what importing does (it may spend a credit).
  */
-export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: File) => void; busy?: string | null; error?: string | null; note?: React.ReactNode }) {
+export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: File, chat: HandedChat) => void; busy?: string | null; error?: string | null; note?: React.ReactNode }) {
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [said, setSaid] = useState<Said[]>([]);
+  const [asking, setAsking] = useState(false);
+  // An edit asked for before the clip: typed into Ask AI once the clip is in, for the customer to send.
+  const [kept, setKept] = useState("");
   const pick = () => !busy && input.current?.click();
+  const spoken = () => said.filter((m) => !m.failed).map(({ from, text }) => ({ from, text }));
+  const take = (file: File) => !busy && onFile(file, { messages: spoken(), ask: kept || undefined });
+  const pickFrom = async (folder: PickFolder) => {
+    const open = (window as unknown as { showOpenFilePicker?: OpenPicker }).showOpenFilePicker;
+    if (folder === "any" || !open) return pick();
+    try {
+      const [handle] = await open({ startIn: folder, types: VIDEO_TYPES });
+      if (handle) take(await handle.getFile());
+    } catch (err) {
+      // Closed without a pick: nothing to do. Refused (a folder it may not open): the file input instead.
+      if ((err as Error)?.name !== "AbortError") pick();
+    }
+  };
+  const ask = async (message: string) => {
+    const history = spoken();
+    setSaid((s) => [...s, { from: "you", text: message }]);
+    setAsking(true);
+    try {
+      const res = await fetch("/api/projects/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, history, kept }) });
+      const data = (await res.json().catch(() => ({}))) as { reply?: string; pick?: PickFolder | null; keep?: string | null; error?: string };
+      if (!res.ok || !data.reply) throw new Error(data.error ?? "The assistant didn't answer. Try again in a moment.");
+      if (typeof data.keep === "string") setKept(data.keep);
+      setSaid((s) => [...s, { from: "ai", text: data.reply!, pick: data.pick ?? undefined }]);
+    } catch (err) {
+      setSaid((s) => [...s, { from: "ai", text: err instanceof Error ? err.message : "The assistant didn't answer.", failed: true }]);
+    } finally {
+      setAsking(false);
+    }
+  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
@@ -32,14 +85,14 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
       e.preventDefault();
       setDragging(false);
       const file = e.dataTransfer.files?.[0];
-      if (file && !busy) onFile(file);
+      if (file) take(file);
     },
   };
 
   return (
     // Wide screens: the window's height, as the editor itself (the timeline stays in view).
     <div className="mx-auto flex w-full max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:py-3" {...drop}>
-      <input ref={input} type="file" accept={CLIP_ACCEPT} className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => (e.target.files?.[0] && onFile(e.target.files[0]), (e.target.value = ""))} />
+      <input ref={input} type="file" accept={CLIP_ACCEPT} className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => (e.target.files?.[0] && take(e.target.files[0]), (e.target.value = ""))} />
       <div className="mb-4 flex shrink-0 items-center gap-2 lg:mb-3">
         <ButtonLink href="/dashboard" variant="tertiary" size="sm" aria-label="Back to the dashboard">
           <ArrowLeft />
@@ -109,16 +162,32 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
           {note && !busy && <p className="mt-4 max-w-sm text-xs text-white/50">{note}</p>}
         </div>
 
-        {/* Ask AI, once there's a clip to change: the editor's full height, beside the timeline too. */}
-        <div className="order-3 flex min-w-0 flex-col lg:order-none lg:row-span-2">
+        {/* Ask AI, from the start: the editor's full height, beside the timeline too. */}
+        <div className="order-3 flex min-w-0 flex-col lg:order-none lg:row-span-2 lg:min-h-0">
           <p className="mb-3 flex items-center gap-1.5 text-sm font-medium text-gray-1000">
             <Sparkles className="size-3.5 text-brand" /> Ask AI
           </p>
-          <div className="flex min-h-[160px] flex-1 flex-col items-center justify-center rounded-lg border border-gray-alpha-400 p-4 text-center">
-            <Sparkles className="size-5 text-gray-900" />
-            <p className="mt-2 text-[13px] text-gray-900">Ask for a cut, captions or something new once your clip is in.</p>
+          <div className="min-h-0 lg:flex-1">
+            <ChatPanel
+              messages={said}
+              busy={asking}
+              onSend={(m) => void ask(m)}
+              onUndo={() => {}}
+              canUndo={() => false}
+              context={kept ? `Waiting for your clip: ${kept}` : undefined}
+              intro={INTRO}
+              placeholder="Pull my video from Downloads"
+              footer={(m) =>
+                m.pick && (
+                  <button type="button" onClick={() => void pickFrom(m.pick!)} disabled={Boolean(busy)} className="mt-2 flex h-8 items-center gap-1.5 rounded-md bg-gray-1000 px-3 text-xs font-medium text-background-100 hover:bg-gray-900 disabled:opacity-50">
+                    <FolderOpen className="size-3.5" />
+                    {m.pick === "any" ? "Choose your clip" : `Open ${FOLDERS[m.pick]}`}
+                  </button>
+                )
+              }
+              fill
+            />
           </div>
-          <div className="mt-3 rounded-lg border border-gray-alpha-400 px-3 py-2.5 text-sm text-gray-900 opacity-60">Describe the edit…</div>
         </div>
 
         {/* The timeline, empty, under the library and the stage. */}

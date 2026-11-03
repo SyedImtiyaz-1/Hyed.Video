@@ -8,7 +8,7 @@ import { reelName } from "@/components/reels/labels";
 import { measureVideo } from "@/components/reels/measure";
 import { EmptyWorkspace } from "@/components/reels/empty-workspace";
 import { ReelEditor } from "@/components/reels/reel-editor";
-import { takeClip } from "@/lib/clip-handoff";
+import { takeChat, takeClip, type HandedChat } from "@/lib/clip-handoff";
 import { takePendingClip } from "@/lib/pending-clip";
 
 type Opened = { url: string; name: string; edit: ReelEdit };
@@ -91,6 +91,8 @@ export function LocalEditor() {
   const [hearing, setHearing] = useState<Hearing | null>(null);
   // Sent here because the clip's upload failed (local development without the render Worker: prompt-box.tsx).
   const [notUploaded, setNotUploaded] = useState(false);
+  // What was said to Ask AI before the clip (in the empty editor): it carries on in the editor's Ask AI.
+  const [chat, setChat] = useState<HandedChat | null>(null);
   const started = useRef(false);
 
   async function hear(file: File) {
@@ -128,6 +130,7 @@ export function LocalEditor() {
     started.current = true;
     setNotUploaded(new URLSearchParams(window.location.search).get("upload") === "failed");
     const handed = takeClip();
+    setChat(takeChat());
     if (handed) void open(handed);
     else void takePendingClip().then((kept) => (kept ? open(kept.file) : setReading(false)));
   }, []);
@@ -173,10 +176,12 @@ export function LocalEditor() {
         local
         heard={hearing?.state === "done" ? hearing.words : null}
         notice={notes.length ? notes : undefined}
+        askFirst={chat?.ask}
+        chatBefore={chat?.messages}
       />
     );
   }
 
   // No clip yet: the editor, empty, as a new project's (a clip picked here opens from this computer, not uploaded).
-  return <EmptyWorkspace onFile={(file) => void open(file)} busy={reading ? "Opening your clip…" : null} error={error} note="It opens in the editor straight from your computer, without uploading." />;
+  return <EmptyWorkspace onFile={(file, said) => (setChat(said), void open(file))}busy={reading ? "Opening your clip…" : null} error={error} note="It opens in the editor straight from your computer, without uploading." />;
 }

@@ -3,10 +3,21 @@
 // reload loses it, and the editor asks for the clip again.
 let handed: File | null = null;
 
-export const handClip = (file: File) => void (handed = file);
+/** What was said to Ask AI in the empty editor before the clip, going with it: the messages, and a request kept for the clip. */
+export type HandedChat = { messages: { from: "you" | "ai"; text: string }[]; ask?: string };
+let said: HandedChat | null = null;
+
+export const handClip = (file: File, chat?: HandedChat) => void ((handed = file), (said = chat ?? null));
 
 export function takeClip(): File | null {
   const file = handed;
   handed = null;
   return file;
+}
+
+/** The conversation handed with the clip, once. */
+export function takeChat(): HandedChat | null {
+  const chat = said;
+  said = null;
+  return chat;
 }

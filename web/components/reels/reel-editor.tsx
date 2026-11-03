@@ -80,6 +80,7 @@ export function ReelEditor({
   editableUntil,
   startAt,
   askFirst,
+  chatBefore,
   watermark = false,
   local = false,
   heard,
@@ -96,6 +97,8 @@ export function ReelEditor({
   startAt?: number;
   /** A change asked for when the reel was made (a template's "Anything to change?"): the editor opens on Ask AI with it typed in. */
   askFirst?: string;
+  /** What was said to Ask AI before the clip was in (a new project's empty editor): Ask AI carries on from it. */
+  chatBefore?: ChatMessage[];
   /** A free-trial reel: it exports with the "Made with Hyped" mark (the export dialog says so). */
   watermark?: boolean;
   /**
@@ -118,7 +121,7 @@ export function ReelEditor({
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTrim, setSelectedTrim] = useState<number | null>(null);
   const [selectedShot, setSelectedShot] = useState<number | null>(null);
-  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>(chatBefore ?? []);
   const [asking, setAsking] = useState(false);
   const [exportState, setExportState] = useState<ReelExport | null>(initialExport);
   const [error, setError] = useState<string | null>(null);

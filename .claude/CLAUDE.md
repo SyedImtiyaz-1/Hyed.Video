@@ -98,7 +98,12 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   `/dashboard/edit/new` ("Your timeline is empty", Import media, drop, Ctrl+I): a clip imported there goes where the
   prompt box sends one (uploaded and started; demo mode, or local development when the upload fails, opens it from
   the computer). The 5-step form (`/dashboard/new`) stays, for websites, from the phones' bottom bar and Projects' empty
-  state. Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
+  state. Ask AI works in the empty editor too, before any clip (Taibanaz, 2 Nov): it only answers what's asked and never
+  acts on its own (`packages/core/src/project-chat.ts`, `/api/projects/chat`, the render Worker's
+  `ReelAssistant.projectChat`, or the root .env's key in local development without the render Worker). "Pull my video
+  from Downloads" gets an Open Downloads button (the browser's file picker opening there; a web page can't reach files
+  itself); an edit asked for before the clip is kept ("Waiting for your clip: …") and typed into the editor's Ask AI
+  once the clip is in, for her to send (the reel's notes when uploaded). Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
 - Syed's editor spec ("Video Editor Prompt", Slack 29 Oct: a four-zone workspace, phase 1), the parts added on
   `launch/realtime-editor` (2 Nov, in PR #13): a Media tab (`media-panel.tsx`); Ask AI answers list what they
   changed with Undo this for that answer alone (`chat-steps.ts`), the box shows "At 0:12 · what's picked" and sends the
