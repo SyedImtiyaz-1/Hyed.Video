@@ -39,7 +39,7 @@ function Choice<T extends string>({ label, options, value, onChange }: { label: 
 }
 
 /** Emojis: on or off, how big and where, and every one in the reel on its word, each changeable to any emoji. */
-export function EmojiPanel({ edit, lines, time, on, behind, actions }: { edit: ReelEdit; lines: CaptionLine[]; time: number; on: boolean; behind: boolean; actions: EmojiActions }) {
+export function EmojiPanel({ edit, lines, time, on, behind, actions, noun = "reel" }: { edit: ReelEdit; lines: CaptionLine[]; time: number; on: boolean; behind: boolean; actions: EmojiActions; noun?: "reel" | "video" }) {
   const [open, setOpen] = useState<number | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   // The word being said at the playhead (or the next one), for "Add".
@@ -68,7 +68,7 @@ export function EmojiPanel({ edit, lines, time, on, behind, actions }: { edit: R
           </div>
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-gray-1000">In this reel</p>
+              <p className="text-sm font-medium text-gray-1000">In this {noun}</p>
               {here && (
                 <button
                   type="button"

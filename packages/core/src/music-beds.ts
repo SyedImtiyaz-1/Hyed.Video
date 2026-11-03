@@ -21,14 +21,26 @@ export const musicGainDb = (volume: number) => Math.round((-31 + 24 * Math.min(1
 export const MUSIC_DUCK_DB = -9;
 export const MUSIC_DEFAULT_VOLUME = 0.5;
 
+/**
+ * A product video's own soundtrack, as it was made (its narration, music and sound effects): its music, in place of a
+ * library bed. Changing it to a bed (or none) keeps the narration only, when it was kept on its own.
+ */
+export const ORIGINAL_MUSIC = "original";
+export type ReelBed = ReelMusic | typeof ORIGINAL_MUSIC;
+export const isReelBed = (v: unknown): v is ReelBed => v === ORIGINAL_MUSIC || isReelMusic(v);
+/** A bed's name as the editor shows it: a library track's, or the video's own soundtrack. */
+export const bedLabel = (track: ReelBed) => (track === ORIGINAL_MUSIC ? "Its own soundtrack" : REEL_MUSIC[track].label);
+
 /** Clean: background noise taken out of the voice. Music: a bed and its volume (0-1), or none. */
-export type ReelAudio = { clean: boolean; music: { track: ReelMusic; volume: number } | null };
+export type ReelAudio = { clean: boolean; music: { track: ReelBed; volume: number } | null };
 export const REEL_AUDIO_NONE: ReelAudio = { clean: false, music: null };
+/** A library bed, or null (none, or a product video's own soundtrack, which the video itself plays). */
+export const libraryBed = (music: ReelAudio["music"]): { track: ReelMusic; volume: number } | null => (music && music.track !== ORIGINAL_MUSIC ? { track: music.track, volume: music.volume } : null);
 
 /** A reel's audio settings read back defensively: reels from before had no clean-up and no music. */
 export function parseAudio(value: unknown): ReelAudio {
   if (!value || typeof value !== "object") return { ...REEL_AUDIO_NONE };
   const v = value as { clean?: unknown; music?: { track?: unknown; volume?: unknown } | null };
-  const music = v.music && isReelMusic(v.music.track) ? { track: v.music.track, volume: typeof v.music.volume === "number" && Number.isFinite(v.music.volume) ? Math.min(1, Math.max(0, Math.round(v.music.volume * 100) / 100)) : MUSIC_DEFAULT_VOLUME } : null;
+  const music = v.music && isReelBed(v.music.track) ? { track: v.music.track, volume: typeof v.music.volume === "number" && Number.isFinite(v.music.volume) ? Math.min(1, Math.max(0, Math.round(v.music.volume * 100) / 100)) : MUSIC_DEFAULT_VOLUME } : null;
   return { clean: v.clean === true, music };
 }

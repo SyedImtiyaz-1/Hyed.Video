@@ -18,7 +18,7 @@ const GROUPS: { label: string; options: Option[] }[] = [
  * Export, as a dialog: the resolution, watermark, frame rate and format the reel will have, then Export. What Hyped
  * can't make yet shows locked. `watermark`: a free-trial reel keeps the "Made with Hyped" mark until a pack is bought.
  */
-export function ExportDialog({ open, onClose, onExport, watermark, until }: { open: boolean; onClose: () => void; onExport: () => void; watermark: boolean; until: string }) {
+export function ExportDialog({ open, onClose, onExport, watermark, until }: { open: boolean; onClose: () => void; onExport: () => void; watermark: boolean; until: string | null }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = dialog.current;
@@ -69,7 +69,7 @@ export function ExportDialog({ open, onClose, onExport, watermark, until }: { op
         ))}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-gray-alpha-400 px-5 py-3">
-        <p className="text-[13px] text-gray-900">Exports are free until {until}.</p>
+        <p className="text-[13px] text-gray-900">{until ? `Exports are free until ${until}.` : "Exports are free."}</p>
         <Button variant="primary" onClick={() => (onExport(), onClose())}>
           Export
         </Button>

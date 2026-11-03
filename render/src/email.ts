@@ -8,7 +8,7 @@ import { templateById } from "@launchreel/core/templates";
 
 type Db = ReturnType<typeof createDb>;
 
-const RATIO: Record<string, string> = { landscape: "16:9", vertical: "9:16", square: "1:1" };
+const RATIO: Record<string, string> = { landscape: "16:9", vertical: "9:16", square: "1:1", portrait: "4:5" };
 const LIME = "#C8F135";
 const INK = "#0A0A0A";
 

@@ -10,16 +10,17 @@ import { getSharedVideo } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
-type Shape = "landscape" | "vertical" | "square";
+type Shape = "landscape" | "vertical" | "square" | "portrait";
 // Each video keeps its own shape, as large as the window allows without scrolling.
 const FRAME: Record<Shape, string> = {
   landscape: "aspect-video w-full max-w-4xl",
   vertical: "aspect-[9/16] w-[min(100%,calc(min(78vh,760px)*0.5625))]",
   square: "aspect-square w-[min(100%,min(78vh,640px))]",
+  portrait: "aspect-[4/5] w-[min(100%,calc(min(78vh,760px)*0.8))]",
 };
 // The link preview's image and video size.
-const SIZE: Record<Shape, [number, number]> = { landscape: [1920, 1080], vertical: [1080, 1920], square: [1080, 1080] };
-const shapeOf = (format: string): Shape => (format === "vertical" || format === "square" ? format : "landscape");
+const SIZE: Record<Shape, [number, number]> = { landscape: [1920, 1080], vertical: [1080, 1920], square: [1080, 1080], portrait: [1080, 1350] };
+const shapeOf = (format: string): Shape => (format === "vertical" || format === "square" || format === "portrait" ? format : "landscape");
 
 type Props = { params: Promise<{ id: string }> };
 

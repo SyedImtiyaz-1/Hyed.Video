@@ -2,7 +2,7 @@ import { templateById } from "@launchreel/core/templates";
 import { ExampleVideo } from "@/components/showcase/example-video";
 import { SHOWCASE, type ShowcaseVideo } from "@/lib/showcase";
 
-const RATIO: Record<ShowcaseVideo["format"], string> = { landscape: "16:9", vertical: "9:16", square: "1:1" };
+const RATIO: Record<ShowcaseVideo["format"], string> = { landscape: "16:9", vertical: "9:16", square: "1:1", portrait: "4:5" };
 
 /** "Made with Hyped": finished videos of real products, each with the template and settings that made it. */
 export function ShowcaseGallery({ videos = SHOWCASE.filter((v) => v.gallery !== false) }: { videos?: readonly ShowcaseVideo[] }) {

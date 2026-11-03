@@ -50,3 +50,19 @@ export async function startExport(jobId: string, revision: number) {
   const { env } = await getCloudflareContext({ async: true });
   await env.VIDEO_JOBS.create({ id: `${jobId}-e${revision}`, params: { jobId, export: revision } });
 }
+
+/** Makes an older product video ready to edit: a workflow of its own (prepareVideo in the render Worker). */
+export async function startPrepare(jobId: string) {
+  if (process.env.NODE_ENV === "development" && process.env.DEV_RENDER_URL) {
+    const res = await fetch(`${process.env.DEV_RENDER_URL}/dev/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-dev-start-token": process.env.DEV_START_TOKEN ?? "" },
+      body: JSON.stringify({ jobId, prepare: true }),
+    }).catch(() => null);
+    if (!res?.ok) throw new Error("The local render Worker didn't start preparing. Is `npm run dev:render` running?");
+    return;
+  }
+  const { env } = await getCloudflareContext({ async: true });
+  // A new instance each try: a failed one can be retried.
+  await env.VIDEO_JOBS.create({ id: `${jobId}-prep-${Date.now()}`, params: { jobId, prepare: true } });
+}

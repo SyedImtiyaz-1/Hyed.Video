@@ -34,6 +34,17 @@ export const REEL_FONT_INFO: Record<ReelFont, { label: string; hint: string }> =
   marker: { label: "Marker", hint: "Hand-drawn capitals" },
   outline: { label: "Outline", hint: "Hollow white letters" },
   pop: { label: "Pop", hint: "Wide lime capitals" },
+  chunky: { label: "Chunky", hint: "Orange cartoon capitals" },
+  slim: { label: "Slim", hint: "Tall gold serif italic" },
+  poster: { label: "Poster", hint: "Pink condensed capitals" },
+  rounded: { label: "Rounded", hint: "Lavender rounded lowercase" },
+  geometric: { label: "Geometric", hint: "Teal geometric lowercase" },
+  didone: { label: "Didone", hint: "Gold fashion-magazine capitals" },
+  bubbly: { label: "Bubbly", hint: "Pink rounded lowercase" },
+  calligraphy: { label: "Calligraphy", hint: "Fine white script" },
+  arcade: { label: "Arcade", hint: "Pink 8-bit pixels" },
+  block: { label: "Block", hint: "Soft yellow capitals" },
+  wide: { label: "Wide", hint: "Extra-wide white capitals" },
 };
 
 /** "Emojis, zooms, sound effects, hook title", or "Captions only". */

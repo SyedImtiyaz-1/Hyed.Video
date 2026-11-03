@@ -14,7 +14,7 @@ Usage: `/brag-slim [input] [options]`. Options (flags or plain language):
 | Option | Default |
 |---|---|
 | `--tone <preset or freeform>` | inferred; `default` if nothing clearly fits |
-| `--format landscape\|vertical\|square` | landscape (1920×1080; vertical 1080×1920, square 1080×1080), 30fps |
+| `--format landscape\|vertical\|square\|portrait` | landscape (1920×1080; vertical 1080×1920, square 1080×1080, portrait 1080×1350), 30fps |
 | `--duration <s>` | about 20s |
 
 Write the deliverables to `brag-output/` in the current directory (timestamped `brag-output-YYYY-MM-DD-HHmmss/` if it already exists). Keep every intermediate file (frames, downloads, scripts, stems) in a `work/` subfolder inside it.

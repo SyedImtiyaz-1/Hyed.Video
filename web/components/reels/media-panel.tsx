@@ -1,6 +1,6 @@
 "use client";
 import { Film, Music, Plus, Video } from "lucide-react";
-import { REEL_MUSIC, type ReelAudio } from "@launchreel/core/music-beds";
+import { bedLabel, type ReelAudio } from "@launchreel/core/music-beds";
 import type { BrollRow } from "./broll-panel";
 
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
@@ -90,7 +90,7 @@ export function MediaPanel({
         <p className="mb-2 text-[13px] text-gray-900">Music</p>
         <button type="button" onClick={onMusic} className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-gray-alpha-100">
           <Music className="size-4 shrink-0 text-gray-900" />
-          <span className="min-w-0 flex-1 truncate text-[13px] text-gray-1000">{music ? REEL_MUSIC[music.track].label : "No music"}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] text-gray-1000">{music ? bedLabel(music.track) : "No music"}</span>
           <span className="shrink-0 text-xs text-gray-900">{music ? `${Math.round(music.volume * 100)}%` : "Pick a track"}</span>
         </button>
       </section>

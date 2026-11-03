@@ -1,50 +1,60 @@
 "use client";
-// The editor's picture, as the render makes it: the moves (punch-ins, pull-ins, shakes) as a transform on the video, the
-// colour filter, colour split and blur as filters on it, then the layers over it in the render's order: VHS lines and
-// grain, flashes to white or black, film grain, the vignette, letterbox bars. The numbers are the render's
-// (packages/core/src/effects.ts, picture.ts, timeline.ts).
+// The editor's picture, as the render makes it: the moves (punch-ins, pull-ins, shakes, twists) as a transform on the
+// video, the colour filter, colour split, blurs, black and white and invert as filters on it, then the layers over it in
+// the render's order: VHS lines and grain, flashes to white or black, film grain, the vignette, letterbox bars, light
+// leaks. The numbers are the render's (packages/core/src/effects.ts, picture.ts, timeline.ts).
 import { useEffect, useId, useRef, type CSSProperties } from "react";
-import type { EffectFrame } from "@launchreel/core/effects";
+import { LEAK, type EffectFrame } from "@launchreel/core/effects";
 import { GRAIN, gradeMatrix, LETTERBOX, VHS, vignetteCss, type ReelPicture } from "@launchreel/core/picture";
 import { viewport } from "@launchreel/core/timeline";
 
-/** The video's transform for a zoom, moved by (dx, dy), aimed at `aimY`: the part in view fills the frame. */
-export function viewTransform(zoom: number, dx: number, dy: number, aimY: number): CSSProperties {
+/**
+ * The video's transform for a zoom, moved by (dx, dy), aimed at `aimY`: the part in view fills the frame; then turned
+ * `rot` degrees about the frame's middle, as the render's rotate after its zoompan.
+ */
+export function viewTransform(zoom: number, dx: number, dy: number, aimY: number, rot = 0): CSSProperties {
   const v = viewport(zoom, dx, dy, aimY);
-  if (v.size >= 0.9999) return {};
-  return { transform: `scale(${(1 / v.size).toFixed(4)}) translate(${(-v.x * 100).toFixed(3)}%, ${(-v.y * 100).toFixed(3)}%)`, transformOrigin: "0 0" };
+  const turn = Math.abs(rot) >= 0.01 ? `translate(50%, 50%) rotate(${rot.toFixed(3)}deg) translate(-50%, -50%) ` : "";
+  if (v.size >= 0.9999 && !turn) return {};
+  return { transform: `${turn}scale(${(1 / v.size).toFixed(4)}) translate(${(-v.x * 100).toFixed(3)}%, ${(-v.y * 100).toFixed(3)}%)`, transformOrigin: "0 0" };
 }
 
 /**
- * The filters on the video: an SVG filter for the colour matrix and the red/blue split (in sRGB, like ffmpeg's
- * colorchannelmixer and rgbashift), then CSS blur. `width` is the frame's width in CSS pixels: blur and split are shares
- * of it. Returns the CSS `filter` and the SVG to put on the page.
+ * The filters on the video: an SVG filter for the colour matrix, the red/blue split (in sRGB, like ffmpeg's
+ * colorchannelmixer and rgbashift) and the sideways motion blur, then CSS blur, black and white, and invert. `width` is
+ * the frame's width in CSS pixels: blurs and split are shares of it. Returns the CSS `filter` and the SVG to put on the
+ * page.
  */
 export function useVideoFilter(picture: ReelPicture, fx: EffectFrame, width: number) {
   const id = `reel-look-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
   const grade = gradeMatrix(picture.filter, picture.strength);
   const split = Math.round(((fx.rgb + (picture.filter === "vhs" ? VHS.rgb * picture.strength : 0)) * width) * 10) / 10;
   const blur = fx.blur * width;
+  const hblur = Math.round(fx.hblur * width * 10) / 10;
+  // Each step reads the one before it.
+  const graded = grade ? "graded" : "SourceGraphic";
+  const splitOut = split > 0 ? "split" : graded;
   const svg =
-    grade || split > 0 ? (
+    grade || split > 0 || hblur > 0 ? (
       <svg width="0" height="0" className="absolute" aria-hidden>
         <filter id={id} colorInterpolationFilters="sRGB" x="0" y="0" width="100%" height="100%">
           {grade && <feColorMatrix type="matrix" values={`${grade.slice(0, 3).join(" ")} 0 ${grade[3]} ${grade.slice(4, 7).join(" ")} 0 ${grade[7]} ${grade.slice(8, 11).join(" ")} 0 ${grade[11]} 0 0 0 1 0`} result="graded" />}
           {split > 0 && (
             <>
-              <feColorMatrix in={grade ? "graded" : "SourceGraphic"} type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="r" />
+              <feColorMatrix in={graded} type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="r" />
               <feOffset in="r" dx={-split} result="r2" />
-              <feColorMatrix in={grade ? "graded" : "SourceGraphic"} type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="g" />
-              <feColorMatrix in={grade ? "graded" : "SourceGraphic"} type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0" result="b" />
+              <feColorMatrix in={graded} type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="g" />
+              <feColorMatrix in={graded} type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0" result="b" />
               <feOffset in="b" dx={split} result="b2" />
               <feBlend in="r2" in2="g" mode="screen" result="rg" />
-              <feBlend in="rg" in2="b2" mode="screen" />
+              <feBlend in="rg" in2="b2" mode="screen" result="split" />
             </>
           )}
+          {hblur > 0 && <feGaussianBlur in={splitOut} stdDeviation={`${hblur} 0`} edgeMode="duplicate" />}
         </filter>
       </svg>
     ) : null;
-  const filter = [svg ? `url(#${id})` : "", blur >= 0.2 ? `blur(${blur.toFixed(2)}px)` : ""].filter(Boolean).join(" ");
+  const filter = [svg ? `url(#${id})` : "", blur >= 0.2 ? `blur(${blur.toFixed(2)}px)` : "", fx.mono ? "grayscale(1)" : "", fx.invert ? "invert(1)" : ""].filter(Boolean).join(" ");
   return { filter: filter || undefined, svg };
 }
 
@@ -92,6 +102,7 @@ export function PictureLayers({ picture, fx, animate = false }: { picture: ReelP
           <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-black" style={{ height: `${LETTERBOX * 100}%` }} aria-hidden />
         </>
       )}
+      {fx.leak > 0 && <span className={cover} style={{ background: `linear-gradient(to bottom right, rgb(${LEAK.r} ${LEAK.g} ${LEAK.b}) ${LEAK.full * 100}%, rgb(${LEAK.r} ${LEAK.g} ${LEAK.b} / 0) ${LEAK.gone * 100}%)`, opacity: fx.leak }} aria-hidden />}
     </>
   );
 }

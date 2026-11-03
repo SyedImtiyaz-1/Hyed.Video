@@ -22,6 +22,7 @@ export const ChatBody = z.object({
       zooms: z.boolean(),
       sfx: z.boolean(),
       hook: z.boolean(),
+      captions: z.boolean().optional(),
     }),
     edit: z.unknown(),
   }),

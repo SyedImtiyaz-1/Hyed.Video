@@ -14,7 +14,7 @@ const TILES: { id: string; spot: string; tilt: number; delay: string }[] = [
 ];
 
 // Each tile's size follows its video's shape.
-const SIZE: Record<ShowcaseVideo["format"], string> = { landscape: "aspect-video w-56", vertical: "aspect-[9/16] w-32", square: "aspect-square w-40" };
+const SIZE: Record<ShowcaseVideo["format"], string> = { landscape: "aspect-video w-56", vertical: "aspect-[9/16] w-32", square: "aspect-square w-40", portrait: "aspect-[4/5] w-36" };
 
 /**
  * Videos Hyped made, scattered around the hero and bobbing gently: a glimpse of what comes out before anyone scrolls.

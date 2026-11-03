@@ -25,8 +25,27 @@ with copies in `web/components/reels/fonts`.
 | Kaushan Script   | `KaushanScript-Regular.ttf`           | `Kaushan Script`                 | OFL 1.1    |
 | Caveat           | `Caveat-Bold.ttf`                     | `Caveat`                         | OFL 1.1    |
 | Permanent Marker | `PermanentMarker-Regular.ttf`         | `Permanent Marker`               | Apache 2.0 |
+| Playfair Display | `PlayfairDisplay[wght].ttf` (as published) | `Playfair Display` (regular) | OFL 1.1, reserved name |
+| Instrument Serif | `InstrumentSerif-Regular.ttf`         | `Instrument Serif` (upright)     | OFL 1.1    |
+| Archivo Expanded | `ArchivoExpanded-ExtraBold.ttf`       | `Archivo Expanded ExtraBold`     | OFL 1.1    |
+| Fredoka          | `Fredoka-Bold.ttf`                    | `Fredoka`                        | OFL 1.1    |
+| Lilita One       | `LilitaOne-Regular.ttf`               | `Lilita One`                     | OFL 1.1    |
+| Poppins Italic   | `Poppins-BoldItalic.ttf`              | `Poppins` (bold italic)          | OFL 1.1    |
+| Dancing Script   | `DancingScript[wght].ttf` (as published) | `Dancing Script` (regular)    | OFL 1.1, reserved name |
+| Great Vibes      | `GreatVibes-Regular.ttf`              | `Great Vibes`                    | OFL 1.1    |
+| Gochi Hand       | `GochiHand-Regular.ttf`               | `Gochi Hand`                     | OFL 1.1    |
+| Courier Prime    | `CourierPrime-Regular.ttf`            | `Courier Prime`                  | OFL 1.1    |
+| Pixelify Sans    | `PixelifySans-Medium.ttf`             | `Pixelify Sans Medium`           | OFL 1.1    |
+| Press Start 2P   | `PressStart2P-Regular.ttf`            | `Press Start 2P`                 | OFL 1.1, reserved name |
 
-"Behind you"'s big-word styles use six of them: Impact (Anton), Editorial (Abril Fatface), Elegant (DM Serif Display
+The last twelve were added in Oct 2026 for the caption templates (`packages/core/src/caption-templates.ts`), from the same
+commit `7085eb89…`. Three of their licences reserve the font's name (Playfair Display, Dancing Script, Press Start 2P), so
+those files are exactly as published: the two variable ones are drawn at their default (regular) weight, by libass and by
+browsers alike. Fredoka (wght 700), Archivo (wdth 125, wght 800) and Pixelify Sans (wght 500) are fixed weights cut from
+their variable fonts as below. Instrument Serif's upright and italic share a family name; libass picks by the italic flag,
+and `src/fonts.ts` names the upright one "Instrument Serif Upright".
+
+"Behind you"'s big-word styles started with six of them: Impact (Anton), Editorial (Abril Fatface), Elegant (DM Serif Display
 Italic), Script (Kaushan Script), Marker (Permanent Marker) and Pop (Archivo Black); Classic and Outline use Inter Black.
 
 All come from Google Fonts' repository, [google/fonts](https://github.com/google/fonts): the first six at commit

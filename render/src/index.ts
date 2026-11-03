@@ -20,6 +20,10 @@ import {
   grantCredits,
   LONG_VIDEO_SECONDS,
   openToken,
+  changeFiles,
+  fetchChangeFacts,
+  GithubApiError,
+  parseGithubSource,
   parseEngine,
   parseReel,
   parseSealedToken,
@@ -39,10 +43,14 @@ import {
   type BrollSource,
   REEL_UPLOAD_TYPES,
   reelSecondsFor,
+  sourceKey,
+  videoOptions,
+  voiceKey,
   type Engine,
   type JobResult,
   type JobSpec,
   type ReelExport,
+  type ReelJob,
   type ReelSpec,
   type RepoTokenJwk,
 } from "@launchreel/core";
@@ -127,8 +135,46 @@ VideoSandbox.outboundByHost = {
   },
 };
 
-/** A job to run, or (`export`) a re-export of an edited reel: its revision, in Job.reel.export. */
-type Params = { jobId: string; export?: number };
+/**
+ * A job to run, or (`export`) a re-export of an edited reel or product video: its revision, in Job.reel.export; or
+ * (`prepare`) an older product video made ready to edit (revision 0).
+ */
+type Params = { jobId: string; export?: number; prepare?: boolean };
+
+/** A product video's longest edit: far past the 90 s they're made at, so cut-free re-exports never trip it. */
+const VIDEO_MAX_SECONDS = 30 * 60;
+
+/** What the runner takes of a reel's options (Job.reel holds the upload and the export too). */
+const reelOptions = (reel: ReelJob): ReelSpec["options"] => ({
+  style: reel.style,
+  look: reel.look,
+  fonts: reel.fonts,
+  emojis: reel.emojis,
+  zooms: reel.zooms,
+  sfx: reel.sfx,
+  hook: reel.hook,
+  broll: reel.broll,
+  language: reel.language,
+  cleanup: reel.cleanup,
+  editStyle: reel.editStyle,
+  strength: reel.strength,
+  ...(reel.captions === false ? { captions: false } : {}),
+});
+
+/** Job.reel for a product video made editable: its starting options, the clean copy as its upload, and what's in it. */
+function videoReel(jobId: string, source: NonNullable<JobResult["source"]>, exported?: ReelExport): ReelJob {
+  return {
+    ...videoOptions(source.captions, source.accent),
+    key: sourceKey(jobId),
+    fileName: "video.mp4",
+    bytes: source.bytes,
+    durationSec: source.duration,
+    width: source.width,
+    height: source.height,
+    video: { burned: source.burned, watermarked: source.watermarked, narrated: source.narrated, voice: source.voice },
+    ...(exported ? { export: exported } : {}),
+  };
+}
 
 const POLL_EVERY = "45 seconds";
 const POLL_SECONDS = 45;
@@ -173,6 +219,7 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
     const { jobId } = event.payload;
     // A re-export runs beside the finished job, which keeps its status and video until the new one replaces it.
     if (event.payload.export) return this.exportReel(jobId, event.payload.export, step);
+    if (event.payload.prepare) return this.prepareVideo(jobId, step);
 
     const job = await step.do("claim job", async () => {
       const db = createDb(this.env.HYPERDRIVE.connectionString);
@@ -225,10 +272,10 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
         const source = job.privateRepo ? await this.downloadPrivateRepo(job.userId, job.sourceUrl) : null;
         const sandbox = sandboxFor(this.env, jobId);
         if (await sandbox.getProcess(processId)) {
-          await source?.cancel(); // a previous attempt of this step already started it
+          await source?.archive.cancel(); // a previous attempt of this step already started it
           return;
         }
-        await sandbox.exec("rm -rf /workspace/project /workspace/out /workspace/result.json /workspace/parent.tgz /workspace/source.tgz");
+        await sandbox.exec("rm -rf /workspace/project /workspace/out /workspace/result.json /workspace/parent.tgz /workspace/source.tgz /workspace/change.json /workspace/change.diff");
 
         const spec: JobSpec = {
           jobId,
@@ -255,8 +302,14 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
           hasSourceArchive: false,
         };
         if (source) {
-          await sandbox.writeFile("/workspace/source.tgz", source);
+          await sandbox.writeFile("/workspace/source.tgz", source.archive);
           spec.hasSourceArchive = true;
+          // A pull request, release or comparison: what GitHub says about it, for the runner's .hyped/change.json.
+          if (source.change) {
+            await sandbox.writeFile("/workspace/change.json", source.change.json);
+            await sandbox.writeFile("/workspace/change.diff", source.change.diff);
+            spec.hasChangeFacts = true;
+          }
         }
         if (job.parentJobId) {
           // Revisions continue from the parent's plan and composition instead of starting over.
@@ -315,16 +368,27 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
           .then((f) => JSON.parse(f.content) as JobResult)
           .catch(() => null);
         if (!result) {
-          return { ok: false, error: finished ? "The render stopped without a result" : "The render took too long", videoUrl: null, posterUrl: null, captionsUrl: null, shareCopy: null, plan: null, metering: null };
+          return { ok: false, error: finished ? "The render stopped without a result" : "The render took too long", videoUrl: null, posterUrl: null, captionsUrl: null, shareCopy: null, plan: null, reel: null, metering: null };
         }
         let videoUrl: string | null = null;
         let posterUrl: string | null = null;
         let captionsUrl: string | null = null;
+        let reel: ReelJob | null = null;
         if (result.ok && result.files.video) {
           videoUrl = await this.store(sandbox, result.files.video, `jobs/${jobId}/brag.mp4`, "video/mp4");
           if (result.files.poster) posterUrl = await this.store(sandbox, result.files.poster, `jobs/${jobId}/brag.jpg`, "image/jpeg");
           if (result.files.captions) captionsUrl = await this.store(sandbox, result.files.captions, `jobs/${jobId}/captions.srt`, "application/x-subrip");
           if (result.files.workspace) await this.store(sandbox, result.files.workspace, `jobs/${jobId}/workspace.tgz`, "application/gzip");
+          // What the editor opens: the clean copy (the agent's video, no captions or mark), the narration alone, the
+          // edit and a small preview. Private: the media route serves brag.* only.
+          const { source, edit, preview, voice } = result.files;
+          if (result.source && source && edit && preview) {
+            await this.store(sandbox, source, sourceKey(jobId), "video/mp4");
+            await this.store(sandbox, edit, `jobs/${jobId}/edit.json`, "application/json");
+            await this.store(sandbox, preview, `jobs/${jobId}/preview.mp4`, "video/mp4");
+            if (voice) await this.store(sandbox, voice, voiceKey(jobId), "audio/mp4");
+            reel = videoReel(jobId, result.source);
+          }
         }
         return {
           ok: Boolean(result.ok && videoUrl),
@@ -334,6 +398,7 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
           captionsUrl,
           shareCopy: result.shareCopy,
           plan: result.plan,
+          reel,
           metering: {
             model: result.model,
             numTurns: result.numTurns,
@@ -355,7 +420,7 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
         if (outcome.ok) {
           await db.job.update({
             where: { id: jobId },
-            data: { ...done, status: "SUCCEEDED", videoUrl: outcome.videoUrl, posterUrl: outcome.posterUrl, captionsUrl: outcome.captionsUrl, shareCopy: outcome.shareCopy, plan: outcome.plan },
+            data: { ...done, status: "SUCCEEDED", videoUrl: outcome.videoUrl, posterUrl: outcome.posterUrl, captionsUrl: outcome.captionsUrl, shareCopy: outcome.shareCopy, plan: outcome.plan, ...(outcome.reel ? { reel: outcome.reel as object } : {}) },
           });
         } else {
           await db.job.update({ where: { id: jobId }, data: { ...done, status: "FAILED", error: redactSecrets(outcome.error ?? "Render failed").slice(0, 2000) } });
@@ -419,7 +484,7 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
         const spec: ReelSpec = {
           jobId,
           input,
-          options: { style: reel.style, look: reel.look, fonts: reel.fonts, emojis: reel.emojis, zooms: reel.zooms, sfx: reel.sfx, hook: reel.hook, broll: reel.broll, language: reel.language, cleanup: reel.cleanup, editStyle: reel.editStyle, strength: reel.strength },
+          options: reelOptions(reel),
           // The container measures the real length: longer than the credits cover fails, and is refunded.
           maxSeconds: reelSecondsFor(job.creditsCost) + 1,
           watermark: job.watermark,
@@ -523,10 +588,11 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
   }
 
   /**
-   * A re-export of an edited reel: the kept upload and the customer's edits (jobs/<id>/edit.json, written by the web
-   * app) rendered again, without speech recognition or planning, in a sandbox of its own. It's free, so nothing is
-   * charged or refunded; the job stays SUCCEEDED with its current video until the new one replaces it, and only
-   * Job.reel.export follows this run. A newer export supersedes an older one still running.
+   * A re-export of an edited reel or product video: the kept upload (a product video's clean copy, with its narration
+   * alone) and the customer's edits (jobs/<id>/edit.json, written by the web app) rendered again, without speech
+   * recognition or planning, in a sandbox of its own. It's free, so nothing is charged or refunded; the job stays
+   * SUCCEEDED with its current video until the new one replaces it, and only Job.reel.export follows this run. A newer
+   * export supersedes an older one still running. A product video keeps its poster and storyboard.
    */
   private async exportReel(jobId: string, revision: number, step: WorkflowStep) {
     const processId = "export-reel";
@@ -544,12 +610,13 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
       const job = await step.do("load export", async () => {
         const db = createDb(this.env.HYPERDRIVE.connectionString);
         const j = await db.job.findUnique({ where: { id: jobId } });
-        const reel = j && j.kind === "reel" ? parseReel(j.reel) : null;
-        if (!j || !reel) throw new NonRetryableError(`Reel ${jobId} not found`);
+        const reel = j && (j.kind === "reel" || j.kind === "video") ? parseReel(j.reel) : null;
+        if (!j || !reel || (j.kind === "video") !== Boolean(reel.video)) throw new NonRetryableError(`Reel ${jobId} not found`);
         if (reel.export?.revision !== revision) throw new NonRetryableError("Superseded by a newer export");
         return { creditsCost: j.creditsCost, watermark: j.watermark, reel: j.reel };
       });
       const reel = parseReel(job.reel)!;
+      const video = reel.video ?? null;
 
       await step.do("start export", { retries: { limit: 3, delay: "20 seconds", backoff: "exponential" }, timeout: "10 minutes" }, async () => {
         const sandbox = sandboxFor(this.env, sandboxId);
@@ -559,18 +626,23 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
         const edit = await this.env.VIDEOS.get(`jobs/${jobId}/edit.json`);
         if (!edit) throw new NonRetryableError("Edit missing: the reel's edits weren't saved");
         const input = `input.${reel.key.split(".").pop()}`;
-        await sandbox.exec("rm -rf /workspace/out /workspace/work /workspace/result.json /workspace/input.* /workspace/edit.json");
+        await sandbox.exec("rm -rf /workspace/out /workspace/work /workspace/result.json /workspace/input.* /workspace/edit.json /workspace/voice.m4a");
         await sandbox.writeFile(`/workspace/${input}`, upload.body);
         await sandbox.writeFile("/workspace/edit.json", await edit.text());
+        // A product video's narration alone, for a new music bed under it.
+        const narration = video?.voice ? await this.env.VIDEOS.get(voiceKey(jobId)) : null;
+        if (narration) await sandbox.writeFile("/workspace/voice.m4a", narration.body);
         const spec: ReelSpec = {
           jobId,
           input,
-          options: { style: reel.style, look: reel.look, fonts: reel.fonts, emojis: reel.emojis, zooms: reel.zooms, sfx: reel.sfx, hook: reel.hook, broll: reel.broll, language: reel.language, cleanup: reel.cleanup, editStyle: reel.editStyle, strength: reel.strength },
-          maxSeconds: reelSecondsFor(job.creditsCost) + 1,
-          watermark: job.watermark,
+          options: reelOptions(reel),
+          maxSeconds: video ? VIDEO_MAX_SECONDS : reelSecondsFor(job.creditsCost) + 1,
+          // A product video made before captions were added afterwards has the free trial's mark in its picture already.
+          watermark: job.watermark && !video?.watermarked,
           watermarkText: `Made with ${this.env.BRAND_NAME}`,
           model: REEL_PLAN_MODEL,
           edit: true,
+          ...(video ? { video: { voice: narration ? "voice.m4a" : null } } : {}),
         };
         await sandbox.writeFile("/workspace/reel.json", JSON.stringify(spec));
         await sandbox.exec("chown -R agent:agent /workspace");
@@ -599,19 +671,21 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
         if (!result?.ok || !result.files.video) return { media: null, plan: null, error: result?.error ?? (finished ? "The export stopped without a result" : "The export took too long") };
         // Same names, so the share page and every link show the new version; ?v= gets past browser caches.
         const v = `?v=${revision}`;
-        const media = {
+        // A product video keeps the poster its agent chose (the runner makes none), and its SRT when it has no words.
+        const media: { videoUrl: string; posterUrl?: string | null; captionsUrl?: string | null } = {
           videoUrl: (await this.store(sandbox, result.files.video, `jobs/${jobId}/brag.mp4`, "video/mp4")) + v,
-          posterUrl: result.files.poster ? (await this.store(sandbox, result.files.poster, `jobs/${jobId}/brag.jpg`, "image/jpeg")) + v : null,
-          captionsUrl: result.files.captions ? (await this.store(sandbox, result.files.captions, `jobs/${jobId}/captions.srt`, "application/x-subrip")) + v : null,
         };
+        if (result.files.poster || !video) media.posterUrl = result.files.poster ? (await this.store(sandbox, result.files.poster, `jobs/${jobId}/brag.jpg`, "image/jpeg")) + v : null;
+        if (result.files.captions || !video) media.captionsUrl = result.files.captions ? (await this.store(sandbox, result.files.captions, `jobs/${jobId}/captions.srt`, "application/x-subrip")) + v : null;
         if (result.files.edit) await this.store(sandbox, result.files.edit, `jobs/${jobId}/edit.json`, "application/json");
-        return { media, plan: result.plan, error: null };
+        // A product video's storyboard stays its agent's.
+        return { media, plan: video ? undefined : result.plan, error: null };
       });
 
       await step.do("finish export", async () => {
         if (attempt.media) {
           const db = createDb(this.env.HYPERDRIVE.connectionString);
-          await db.job.update({ where: { id: jobId }, data: { ...attempt.media, plan: attempt.plan } });
+          await db.job.update({ where: { id: jobId }, data: { ...attempt.media, ...(attempt.plan !== undefined ? { plan: attempt.plan } : {}) } });
           await setExport({ status: "done", finishedAt: new Date().toISOString() });
         } else {
           await setExport({ status: "failed", finishedAt: new Date().toISOString(), error: redactSecrets(attempt.error ?? "Export failed").slice(0, 500) });
@@ -628,10 +702,112 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
   }
 
   /**
-   * Downloads a private repo with the customer's saved GitHub token. The token is decrypted here, used for one
-   * request to GitHub and dropped: it never reaches the container, a workflow step result or a log.
+   * Makes an older product video editable (one made before the captions were added after the agent): its video as the
+   * clean copy, with the narration alone and its words from the job's kept workspace, and the edit and small preview
+   * reel.ts writes for the editor. Its captions and the free trial's mark are in its picture already. Free; the video
+   * itself doesn't change. Job.reel.export (revision 0) follows this run, which the web app started.
    */
-  private async downloadPrivateRepo(userId: string, repoUrl: string): Promise<ReadableStream<Uint8Array>> {
+  private async prepareVideo(jobId: string, step: WorkflowStep) {
+    const processId = "prepare-video";
+    const sandboxId = `${jobId}-prep`;
+    const setPrepared = async (patch: Partial<ReelExport>, reel?: ReelJob) => {
+      const db = createDb(this.env.HYPERDRIVE.connectionString);
+      const j = await db.job.findUnique({ where: { id: jobId }, select: { reel: true } });
+      const current = ((j?.reel ?? {}) as { export?: Partial<ReelExport> }).export ?? {};
+      if (current.revision !== 0) return; // exported since, or never started here
+      const next = reel ?? ((j?.reel ?? {}) as ReelJob);
+      await db.job.update({ where: { id: jobId }, data: { reel: { ...next, export: { ...current, ...patch } } as object } });
+    };
+    let finished = false;
+    try {
+      const job = await step.do("load video", async () => {
+        const db = createDb(this.env.HYPERDRIVE.connectionString);
+        const j = await db.job.findUnique({ where: { id: jobId } });
+        if (!j || j.kind !== "video" || j.status !== "SUCCEEDED") throw new NonRetryableError(`Video ${jobId} not found`);
+        return { watermark: j.watermark, captions: j.captions, voice: j.voice };
+      });
+
+      await step.do("start prepare", { retries: { limit: 3, delay: "20 seconds", backoff: "exponential" }, timeout: "10 minutes" }, async () => {
+        const sandbox = sandboxFor(this.env, sandboxId);
+        if (await sandbox.getProcess(processId)) return;
+        const made = await this.env.VIDEOS.get(`jobs/${jobId}/brag.mp4`);
+        if (!made) throw new NonRetryableError("Upload missing: the video's file is gone");
+        await sandbox.exec("rm -rf /workspace/out /workspace/work /workspace/result.json /workspace/input.mp4 /workspace/ws /workspace/workspace.tgz /workspace/voice.wav /workspace/captions.json");
+        await sandbox.writeFile("/workspace/input.mp4", made.body);
+        // The narration and its words, from the workspace the job kept for revisions (videos without one have neither).
+        const workspace = job.voice ? await this.env.VIDEOS.get(`jobs/${jobId}/workspace.tgz`) : null;
+        let narrated = false;
+        if (workspace) {
+          await sandbox.writeFile("/workspace/workspace.tgz", workspace.body);
+          await sandbox.exec("mkdir -p /workspace/ws && tar -xzf /workspace/workspace.tgz -C /workspace/ws brag-output/work/voice/voice.wav brag-output/work/voice/captions.json; true");
+          const found = await sandbox.exec("test -f /workspace/ws/brag-output/work/voice/voice.wav && test -f /workspace/ws/brag-output/work/voice/captions.json && mv /workspace/ws/brag-output/work/voice/voice.wav /workspace/ws/brag-output/work/voice/captions.json /workspace/");
+          narrated = found.exitCode === 0;
+          await sandbox.exec("rm -rf /workspace/ws /workspace/workspace.tgz");
+        }
+        const spec: ReelSpec = {
+          jobId,
+          input: "input.mp4",
+          // As made: its captions (drawn into its picture already, when it had them) aren't added again.
+          options: videoOptions(false),
+          maxSeconds: VIDEO_MAX_SECONDS,
+          watermark: false,
+          watermarkText: `Made with ${this.env.BRAND_NAME}`,
+          model: REEL_PLAN_MODEL,
+          video: { voice: narrated ? "voice.wav" : null, words: narrated ? "captions.json" : null, editorOnly: true },
+        };
+        await sandbox.writeFile("/workspace/reel.json", JSON.stringify(spec));
+        await sandbox.exec("chown -R agent:agent /workspace");
+        await sandbox.startProcess("runuser -u agent -- node /app/dist/reel.mjs", { processId, cwd: "/workspace", env: { HOME: "/home/agent", JOB_ROOT: "/workspace", PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright" } });
+      });
+
+      for (let i = 0; i < REEL_MAX_POLLS && !finished; i++) {
+        await step.sleep(`wait prepare ${i}`, REEL_POLL_EVERY);
+        finished = await step.do(`check prepare ${i}`, async () => {
+          const proc = await sandboxFor(this.env, sandboxId).getProcess(processId);
+          return !proc || !(proc.status === "running" || proc.status === "starting");
+        });
+      }
+      if (!finished) await step.do("stop prepare", async () => void (await sandboxFor(this.env, sandboxId).killProcess(processId).catch(() => {})));
+
+      const outcome = await step.do("collect prepare", { retries: { limit: 3, delay: "20 seconds", backoff: "exponential" }, timeout: "10 minutes" }, async () => {
+        const sandbox = sandboxFor(this.env, sandboxId);
+        const result = await sandbox
+          .readFile("/workspace/result.json")
+          .then((f) => JSON.parse(f.content) as JobResult)
+          .catch(() => null);
+        if (!result?.ok || !result.files.edit || !result.files.preview) return { reel: null, error: result?.error ?? (finished ? "Preparing stopped without a result" : "Preparing took too long") };
+        await this.store(sandbox, result.files.edit, `jobs/${jobId}/edit.json`, "application/json");
+        await this.store(sandbox, result.files.preview, `jobs/${jobId}/preview.mp4`, "video/mp4");
+        if (result.files.voice) await this.store(sandbox, result.files.voice, voiceKey(jobId), "audio/mp4");
+        // The video as it is becomes the clean copy, copied inside the bucket.
+        const made = await this.env.VIDEOS.get(`jobs/${jobId}/brag.mp4`);
+        if (!made) return { reel: null, error: "Upload missing: the video's file is gone" };
+        await this.env.VIDEOS.put(sourceKey(jobId), made.body.pipeThrough(new FixedLengthStream(made.size)), { httpMetadata: { contentType: "video/mp4" } });
+        const edit = JSON.parse((await sandbox.readFile(`/workspace/${result.files.edit}`)).content) as { width: number; height: number; duration: number; words: unknown[] };
+        const narrated = Boolean(result.files.voice);
+        // Narrated videos had their captions drawn in by the agent, unless the customer turned them off.
+        const burned = Boolean(job.voice) && job.captions !== false;
+        const source = { burned, watermarked: job.watermark, narrated: Boolean(job.voice), voice: narrated, captions: false, accent: null, width: edit.width, height: edit.height, duration: edit.duration, bytes: made.size };
+        return { reel: videoReel(jobId, source), error: null };
+      });
+
+      if (outcome.reel) await step.do("finish prepare", async () => setPrepared({ status: "done", finishedAt: new Date().toISOString() }, outcome.reel!));
+      else await step.do("fail prepare", async () => setPrepared({ status: "failed", finishedAt: new Date().toISOString(), error: redactSecrets(outcome.error ?? "Preparing failed").slice(0, 500) }));
+    } catch (err) {
+      await step.do("fail prepare", async () => setPrepared({ status: "failed", finishedAt: new Date().toISOString(), error: redactSecrets(err instanceof Error ? err.message : String(err)).slice(0, 500) }));
+    }
+    await step.do("destroy prepare sandbox", async () => {
+      await sandboxFor(this.env, sandboxId).destroy();
+    });
+  }
+
+  /**
+   * Downloads a private repo with the customer's saved GitHub token: its default branch, or for a pull request,
+   * release or comparison the change's head, with what GitHub says about the change (its facts and diff, for the
+   * runner's .hyped/change.json). The token is decrypted here, used only for requests to GitHub and dropped: it never
+   * reaches the container, a workflow step result or a log.
+   */
+  private async downloadPrivateRepo(userId: string, repoUrl: string): Promise<{ archive: ReadableStream<Uint8Array>; change: { json: string; diff: string } | null }> {
     const db = createDb(this.env.HYPERDRIVE.connectionString);
     const saved = await db.repoToken.findUnique({ where: { userId } });
     if (!saved) throw new NonRetryableError("Private repository: no GitHub token is saved (paste one under the repo link)");
@@ -643,18 +819,35 @@ export class VideoJobWorkflow extends WorkflowEntrypoint<Env, Params> {
     } catch {
       throw new NonRetryableError("Private repository: the saved GitHub token can't be read. Paste it again under the repo link.");
     }
+    const source = parseGithubSource(repoUrl);
     const [, owner, name] = new URL(repoUrl).pathname.split("/");
-    const repo = `${owner}/${(name ?? "").replace(/\.git$/, "")}`;
+    const repo = source?.slug ?? `${owner}/${(name ?? "").replace(/\.git$/, "")}`;
+    // Only ever api.github.com: the paths come from the parsed link.
+    const github = (path: string, accept = "application/vnd.github+json") =>
+      fetch(`https://api.github.com${path}`, { headers: { authorization: `Bearer ${token}`, accept, "x-github-api-version": "2022-11-28", "user-agent": "hyped-render" } });
+    let change: { json: string; diff: string } | null = null;
+    let ref = "";
+    if (source?.change) {
+      try {
+        const read = await fetchChangeFacts(source, repoUrl, github);
+        change = changeFiles(read.facts, read.diff);
+        ref = `/${read.head}`;
+      } catch (err) {
+        if (err instanceof GithubApiError && [401, 403, 404, 422].includes(err.status)) {
+          const access = source.change.kind === "pull" ? "Contents and Pull requests: read-only" : "Contents: read-only";
+          throw new NonRetryableError(`Private repository: GitHub answered ${err.status} for ${err.what}. Check that your saved token can read it (${access}).`);
+        }
+        throw err;
+      }
+    }
     // GitHub answers with a redirect to a short-lived download link, which fetch follows without the token.
-    const res = await fetch(`https://api.github.com/repos/${repo}/tarball`, {
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "hyped-render" },
-    });
+    const res = await github(`/repos/${repo}/tarball${ref}`);
     if (res.status === 401 || res.status === 403 || res.status === 404) {
       throw new NonRetryableError(`Private repository: GitHub answered ${res.status}. Check that your saved token can read ${repo}.`);
     }
     if (!res.ok || !res.body) throw new Error(`Private repository: GitHub download failed (${res.status})`);
     await db.repoToken.update({ where: { userId }, data: { lastUsedAt: new Date() } });
-    return res.body.pipeThrough(limitBytes(MAX_REPO_BYTES));
+    return { archive: res.body.pipeThrough(limitBytes(MAX_REPO_BYTES)), change };
   }
 
   /** Streams a file out of the container into R2 and returns its public URL. */
@@ -742,7 +935,7 @@ async function devUploads(request: Request, env: Env, url: URL): Promise<Respons
   return new Response("Not found", { status: 404 });
 }
 
-const EDITOR_FILE = /^jobs\/[a-z0-9]+\/(edit\.json|preview\.mp4)$/;
+const EDITOR_FILE = /^jobs\/[a-z0-9]+\/(edit\.json|preview\.mp4|voice\.m4a|source\.mp4)$/;
 
 /**
  * Local development only: the reel editor's files (web/lib/reel-edits.ts) in this Worker's bucket, read (with ranges,
@@ -899,10 +1092,11 @@ export default {
     // here. Off unless DEV_START_TOKEN is set, which only happens in render/.dev.vars; production never has it.
     if (request.method === "POST" && url.pathname === "/dev/start") {
       if (!env.DEV_START_TOKEN || request.headers.get("x-dev-start-token") !== env.DEV_START_TOKEN) return new Response("Not found", { status: 404 });
-      const { jobId, export: revision } = (await request.json().catch(() => ({}))) as { jobId?: string; export?: number };
+      const { jobId, export: revision, prepare } = (await request.json().catch(() => ({}))) as { jobId?: string; export?: number; prepare?: boolean };
       if (!jobId || !/^[a-z0-9]+$/.test(jobId)) return new Response("Bad job id", { status: 400 });
       if (revision !== undefined && !(Number.isInteger(revision) && revision > 0)) return new Response("Bad revision", { status: 400 });
-      await env.VIDEO_JOBS.create(revision ? { id: `${jobId}-e${revision}`, params: { jobId, export: revision } } : { id: jobId, params: { jobId } });
+      const instance = prepare ? { id: `${jobId}-prep-${Date.now()}`, params: { jobId, prepare: true } } : revision ? { id: `${jobId}-e${revision}`, params: { jobId, export: revision } } : { id: jobId, params: { jobId } };
+      await env.VIDEO_JOBS.create(instance);
       return Response.json({ ok: true });
     }
     return new Response("render worker: ok");

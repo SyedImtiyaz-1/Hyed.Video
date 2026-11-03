@@ -27,6 +27,9 @@ export function redactSecrets(text: string): string {
 /** What a customer sees when a render fails. The technical error stays in the database for support. */
 export function customerError(error: string | null | undefined): string {
   if (!error) return "Something went wrong while making this video.";
+  if (/private repository/i.test(error) && /pull request/i.test(error)) return "We couldn't read this pull request in your private repository. Give your GitHub token Pull requests: read-only access as well as Contents, paste it again under the repo link and try again.";
+  // A public pull request, release or comparison that couldn't be fetched (runner/src/change.ts): written for the customer.
+  if (error.startsWith("GitHub change: ")) return error.slice("GitHub change: ".length);
   if (/private repository/i.test(error)) return "We couldn't open your private repository. Check that your GitHub token can read it, then paste a new one under the repo link and try again.";
   if (isProviderFailure(error)) return "Our AI provider had a problem, so this video couldn't be made. Please try again in a few minutes.";
   if (/took too long|timed out/i.test(error)) return "This video took too long to make. Please try again.";

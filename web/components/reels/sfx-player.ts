@@ -1,7 +1,7 @@
 "use client";
 // The editor's sound effects: the same sounds the render mixes (packages/core/src/sounds.ts), from their AAC copies in
 // public/reels/sfx, at the same gains, so the preview sounds like the export. Web Audio, started on the first click.
-import { MUSIC_DUCK_DB, musicGainDb, musicPreviewUrl, type ReelAudio, type ReelMusic } from "@launchreel/core/music-beds";
+import { MUSIC_DUCK_DB, musicGainDb, musicPreviewUrl, type ReelMusic } from "@launchreel/core/music-beds";
 import { REEL_SOUNDS, soundPreviewUrl, type ReelSound } from "@launchreel/core/sounds";
 import type { SoundCue } from "@launchreel/core/timeline";
 
@@ -109,7 +109,8 @@ export class CuePlayer {
  * speaks (`speaking`), where the render's sidechain compressor dips it about as much. Give it the time every frame.
  */
 export class MusicPlayer {
-  music: ReelAudio["music"] = null;
+  /** A library bed (libraryBed): a product video's own soundtrack plays in the video itself. */
+  music: { track: ReelMusic; volume: number } | null = null;
   speaking: (time: number) => boolean = () => false;
   private source: AudioBufferSourceNode | null = null;
   private gain: GainNode | null = null;
@@ -160,6 +161,67 @@ export class MusicPlayer {
     this.source = source;
     this.gain = gain;
     this.playingTrack = music.track;
+  }
+}
+
+/**
+ * A product video's narration alone, in step with its preview, for when its own soundtrack is swapped for a library bed
+ * (the preview then plays muted). On the recording's clock, as the preview video plays: give it the video's time every
+ * frame. A seek, a jump over a cut, or drift past a sixth of a second starts it again where the video is.
+ */
+export class TrackPlayer {
+  url: string | null = null;
+  private source: AudioBufferSourceNode | null = null;
+  private playingUrl: string | null = null;
+  private last: number | null = null;
+  private starting = false;
+  /** Where the track started: the video's time and the audio clock's then. */
+  private anchor: { time: number; at: number } | null = null;
+
+  tick(time: number, playing: boolean) {
+    const ctx = audio();
+    if (!ctx || !playing || !this.url) return this.reset();
+    const jumped = this.last === null || time < this.last || time - this.last > 0.3;
+    this.last = time;
+    const drift = this.anchor ? Math.abs(this.anchor.time + (ctx.currentTime - this.anchor.at) - time) : 0;
+    if ((jumped || drift > 0.16 || !this.source || this.playingUrl !== this.url) && !this.starting) void this.start(time);
+  }
+
+  /** Stops the track, so the next frame starts it fresh where the video is. */
+  reset() {
+    this.last = null;
+    this.anchor = null;
+    if (this.source) {
+      try {
+        this.source.stop();
+      } catch {}
+      this.source.disconnect();
+    }
+    this.source = null;
+    this.playingUrl = null;
+  }
+
+  private async start(time: number) {
+    const url = this.url;
+    const ctx = audio();
+    if (!url || !ctx) return;
+    this.starting = true;
+    const buffer = await load(url);
+    this.starting = false;
+    if (!buffer || this.url !== url) return;
+    const last = this.last;
+    this.reset();
+    this.last = last ?? time;
+    // Loading took a moment: start where the video is now.
+    const at = this.last;
+    if (at >= buffer.duration) return;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0, at);
+    this.source = source;
+    this.playingUrl = url;
+    this.anchor = { time: at, at: ctx.currentTime };
   }
 }
 

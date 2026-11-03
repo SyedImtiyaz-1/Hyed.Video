@@ -30,15 +30,15 @@ export function EffectThumb({ effect, playing, className }: { effect: ReelEffect
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
   }, [playing, spec.length]);
-  // Still, each shows a telling frame: half way into a flash or a fade, the peak of a move.
-  const still = { flash: -0.1, blackout: -0.2, strobe: 0.03, pullout: 0.05 }[effect as string] ?? 0;
+  // Still, each shows a telling frame: half way into a flash or a fade, the peak of a move, a camera move well under way.
+  const still = { flash: -0.1, blackout: -0.2, strobe: 0.03, pullout: 0.05, push: 0.7, drift: 0.3 }[effect as string] ?? 0;
   const fx = effectsAt([{ at: 0, effect, length: spec.length }], playing ? t : still * spec.length);
   const { filter, svg } = useVideoFilter(PICTURE_DEFAULTS, fx, 96);
   return (
     <span className={cn("relative block aspect-[9/16] w-full overflow-hidden rounded-md bg-[#1a1d24]", className)}>
       {svg}
       {/* eslint-disable-next-line @next/next/no-img-element -- the shared sample still */}
-      <img src="/reels/sample-frame.jpg" alt="" className="absolute inset-0 size-full object-cover" style={{ ...viewTransform(1 + fx.zoom, fx.dx, fx.dy, zoomAim(9, 16)), filter }} loading="lazy" decoding="async" />
+      <img src="/reels/sample-frame.jpg" alt="" className="absolute inset-0 size-full object-cover" style={{ ...viewTransform(1 + fx.zoom, fx.dx, fx.dy, zoomAim(9, 16), fx.rot), filter }} loading="lazy" decoding="async" />
       <PictureLayers picture={PICTURE_DEFAULTS} fx={fx} animate={playing} />
     </span>
   );
@@ -56,7 +56,7 @@ export type EffectActions = {
  * Transitions and effects, CapCut-style: pick one to put it at the playhead (or on a cut close by), or on every cut;
  * each placed one can change kind, length and moment. "With sound" brings the effect's sound along.
  */
-export function EffectsPanel({ effects, cuts, time, actions }: { effects: PlacedEffect[]; cuts: number[]; time: number; actions: EffectActions }) {
+export function EffectsPanel({ effects, cuts, time, actions, noun = "reel" }: { effects: PlacedEffect[]; cuts: number[]; time: number; actions: EffectActions; noun?: "reel" | "video" }) {
   const [hover, setHover] = useState<ReelEffect | null>(null);
   const [withSound, setWithSound] = useState(true);
   const [forCuts, setForCuts] = useState<ReelEffect>("flash");
@@ -122,7 +122,7 @@ export function EffectsPanel({ effects, cuts, time, actions }: { effects: Placed
       </div>
 
       <div>
-        <p className="mb-2 text-sm font-medium text-gray-1000">In this reel</p>
+        <p className="mb-2 text-sm font-medium text-gray-1000">In this {noun}</p>
         {effects.length === 0 && <p className="text-[13px] text-gray-900">None yet. Add one above, or click a word on the video and pick an effect.</p>}
         <ul className="space-y-2">
           {effects.map((e, i) => {

@@ -164,7 +164,7 @@ erDiagram
     enum status "QUEUED RUNNING SUCCEEDED FAILED"
     enum sourceType "WEBSITE GITHUB"
     string sourceUrl
-    string format "landscape vertical square"
+    string format "landscape vertical square portrait"
     int creditsCost
     bool watermark
     string videoUrl

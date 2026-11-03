@@ -24,7 +24,7 @@ const INCLUDED = [
   { icon: Captions, label: "Word-by-word captions and SRT file" },
   { icon: Music, label: "Licensed music and sound effects" },
   { icon: Megaphone, label: "Share copy for X, LinkedIn and Product Hunt" },
-  { icon: MonitorSmartphone, label: "16:9, 9:16 or 1:1" },
+  { icon: MonitorSmartphone, label: "16:9, 9:16, 1:1 or 4:5" },
   { icon: Check, label: "Yours to use commercially, ads included" },
 ];
 
@@ -32,7 +32,7 @@ const STUDIO_Q = "What's the difference between Standard and Studio?";
 const FAQ = [
   {
     q: "What do I get?",
-    a: "An MP4 with music, motion and on-screen copy: a 15–30 second teaser for social, or a 60–90 second launch video for your homepage. Plus a poster image and ready-to-post share copy, in landscape, vertical or square.",
+    a: "An MP4 with music, motion and on-screen copy: a 15–30 second teaser for social, or a 60–90 second launch video for your homepage. Plus a poster image and ready-to-post share copy, in landscape, vertical, square or 4:5 portrait.",
   },
   { q: "How long does it take?", a: "Usually 10–20 minutes for a teaser, up to an hour for a 90-second video. You can close the tab; the dashboard updates when it's ready." },
   { q: "Is it made from my actual product?", a: "Yes. We read your site or code and reuse your real UI, copy, colors and fonts. No stock footage, no avatars." },

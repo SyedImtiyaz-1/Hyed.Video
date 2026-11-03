@@ -1,9 +1,9 @@
 // Templates: proven recipes for the videos people make most. A template fills the new-video steps (every choice stays
 // editable) and hands the agent the story beat by beat. Browsing is free; a video costs the usual credits.
-import type { MusicChoice, VideoType } from "./contract";
+import type { MusicChoice, VideoFormat, VideoType } from "./contract";
 import type { VoiceId } from "./voices";
 
-export type TemplateGoal = "launch" | "update" | "ads" | "explain" | "dev";
+export type TemplateGoal = "launch" | "update" | "ads" | "explain" | "dev" | "app";
 
 /** One beat of the story: seconds into the video, a short name, and what happens. */
 export type TemplateBeat = { from: number; to: number; label: string; text: string };
@@ -18,7 +18,7 @@ export type Template = {
   platforms: string[];
   videoType: VideoType;
   durationSec: number;
-  format: "landscape" | "vertical" | "square";
+  format: VideoFormat;
   /** A tone from the new-video steps ("" lets the agent choose). */
   tone: string;
   music: MusicChoice;
@@ -28,6 +28,9 @@ export type Template = {
   beats: TemplateBeat[];
   /** Extra rules for the agent, when the recipe needs them. */
   rules?: string[];
+  /** The shapes and lengths (seconds) it allows, when fewer than every video's (an app store's own limits). */
+  formats?: VideoFormat[];
+  durations?: [number, number];
 };
 
 export const TEMPLATE_GOALS: { value: TemplateGoal; label: string }[] = [
@@ -36,6 +39,7 @@ export const TEMPLATE_GOALS: { value: TemplateGoal; label: string }[] = [
   { value: "ads", label: "Ads" },
   { value: "explain", label: "Explain" },
   { value: "dev", label: "Developers" },
+  { value: "app", label: "Apps" },
 ];
 
 export const TEMPLATES: Template[] = [
@@ -97,7 +101,7 @@ export const TEMPLATES: Template[] = [
       { from: 6, to: 11, label: "Tagline", text: "The tagline, one line, big." },
       { from: 11, to: 15, label: "Coming soon", text: "Coming soon, with the launch date or web address." },
     ],
-    rules: ["Keep it mysterious: never show the whole product at once."],
+    rules: ["Keep it mysterious: never show the whole product at once.", "Show a launch date only if the brief or the site gives one."],
   },
   {
     id: "feature-drop",
@@ -112,11 +116,12 @@ export const TEMPLATES: Template[] = [
     music: "upbeat",
     voice: null,
     beats: [
-      { from: 0, to: 3, label: "What's new", text: "The feature's name, with a version badge if there is one." },
+      { from: 0, to: 3, label: "What's new", text: "The feature's name, with a version badge if there is one, over the feature already working." },
       { from: 3, to: 9, label: "Before", text: "The old way, or the problem." },
       { from: 9, to: 16, label: "After", text: "The new feature working in the real UI." },
       { from: 16, to: 20, label: "Try it", text: "How to try it, with the web address." },
     ],
+    rules: ["Call it new, or show a version number, only when the brief, the changelog or the site says so."],
   },
   {
     id: "walkthrough",
@@ -214,7 +219,7 @@ export const TEMPLATES: Template[] = [
       { from: 20, to: 26, label: "Logos", text: "Customer logos or usage numbers." },
       { from: 26, to: 30, label: "CTA", text: "Call to action with the web address." },
     ],
-    rules: ["Use only quotes, names, logos and numbers that appear on the website or in the project. Never invent a testimonial or a statistic; if there are none, show real results from the product instead."],
+    rules: ["Use only quotes, names, logos and numbers that appear on the website or in the project. Never invent a testimonial or a statistic; if there are none, show real results from the product instead.", "With a voiceover, the voice never speaks a quote as if it were the customer: it says who said it."],
   },
   {
     id: "readme-loop",
@@ -233,7 +238,65 @@ export const TEMPLATES: Template[] = [
       { from: 4, to: 12, label: "Result", text: "The result appearing." },
       { from: 12, to: 15, label: "Loop", text: "Ease back to the opening frame, so the loop is seamless." },
     ],
-    rules: ["It plays silently on a loop: no voice, no music, and no text that depends on sound. The last frame must match the first."],
+    rules: ["It plays silently on a loop: no voice, no music, and no text that depends on sound. The last frame must match the first.", "No end card or call to action: the loop goes straight back to the opening frame, which is also the poster."],
+  },
+  {
+    // Apple's rules: App Store Review Guideline 2.3.4 and the app preview specifications (see runner/skills/hyped-app).
+    id: "app-store-preview",
+    name: "App Store Preview",
+    use: "The video at the top of your App Store page",
+    goal: "app",
+    platforms: ["App Store"],
+    videoType: "demo",
+    durationSec: 30,
+    durations: [15, 30],
+    formats: ["vertical", "landscape"],
+    format: "vertical",
+    tone: "app-store",
+    music: "upbeat",
+    voice: null,
+    beats: [
+      { from: 0, to: 3, label: "Hook", text: "The app's core moment in its real screens, full screen, with a line of at most 5 words." },
+      { from: 3, to: 7, label: "Promise", text: "The app's main screen and its promise, settled at 5 s: Apple's default poster frame." },
+      { from: 7, to: 25, label: "In use", text: "Three things people do in the app, about 6 s each, full screen, a short label on each and a touch point on every tap." },
+      { from: 25, to: 30, label: "End", text: "The app's icon and name over its best screen." },
+    ],
+    rules: [
+      "Apple accepts 15 to 30 seconds and nothing else: the finished video runs between 15.5 and 29.5 seconds, whatever the length chosen or the voice's timing.",
+      "Show only the app itself: its real screens from the site, the App Store listing's screenshots, its own screen recordings, or its web app captured with --viewport mobile. Never invent or rebuild a screen, and never show a device frame, a border or backdrop around the app's screen, hands, people, or anything that isn't the app.",
+      "Current iPhones take 886×1920, cut from the centre of this video: keep the app's screen and every word inside the centre column x 97-983, top to bottom, with nothing but the scene's own background colour in the 97 px strips on either side.",
+      "Words: at most 5 a line, large, held long enough to read, saying only what the app or its listing says. No prices, dates or seasonal words, rankings, 'Download', store badges, web addresses, or other platforms' names and logos. If a feature shown needs a subscription, a purchase or a login, say so in small text on the end frame.",
+      "One music track from start to finish, a few soft interface sounds, and simple transitions (cuts, dissolves, fades, or the app's own slides); nothing may suggest the app does something it doesn't.",
+      "The frame at 5 seconds is Apple's default poster: a settled, full-screen view of the app with the promise line, whatever the length.",
+    ],
+  },
+  {
+    // Google Play's preview video: a YouTube link in Play Console (see runner/skills/hyped-app).
+    id: "play-store-promo",
+    name: "Play Store Promo",
+    use: "The preview video on your Google Play listing, via YouTube",
+    goal: "app",
+    platforms: ["Google Play", "YouTube"],
+    videoType: "demo",
+    durationSec: 30,
+    durations: [15, 30],
+    formats: ["landscape", "vertical"],
+    format: "landscape",
+    tone: "default",
+    music: "upbeat",
+    voice: null,
+    beats: [
+      { from: 0, to: 3, label: "Hook", text: "The app's core moment in its real screens, with a short line." },
+      { from: 3, to: 11, label: "Core", text: "The main thing people do in the app, from the first tap to the result." },
+      { from: 11, to: 25, label: "More", text: "Two more features in use, one scene each, each with a short label." },
+      { from: 25, to: 30, label: "End", text: "The app's icon, name and promise." },
+    ],
+    rules: [
+      "Google Play autoplays the first 30 seconds muted: the app is on screen from the first frame, and the whole story reads with the sound off by second 30.",
+      "At least 80% of the video is the app in use: its real screens from the site, the Play listing's screenshots, its own screen recordings, or its web app captured with --viewport mobile. Never invent a screen, keep logo and title cards short, and never show hands or people using a device.",
+      "No calls to action ('Download now', 'Install now', 'Try now'), store badges, web addresses, prices, dates, rankings, download counts, or words like 'Best', '#1', 'Top', 'New', 'Free' or 'Sale'.",
+      "A phone app in this wide frame: its screens large, without a device frame, beside the words; never small in empty space or between black bars.",
+    ],
   },
 ];
 

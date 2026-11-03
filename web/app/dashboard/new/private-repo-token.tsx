@@ -1,5 +1,6 @@
 "use client";
 import { ExternalLink, Lock, ShieldCheck } from "lucide-react";
+import { canonicalGithubUrl, parseGithubSource } from "@launchreel/core/github";
 import { sealToken, tokenHint, type RepoTokenJwk } from "@launchreel/core/repo-token";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -9,7 +10,6 @@ export type SavedRepoToken = { hint: string; createdAt: string; lastUsedAt: stri
 export type RepoTokenSetup = { userId: string; publicKey: RepoTokenJwk | null; saved: SavedRepoToken; demo: boolean };
 
 const TOKEN = /^(github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,})$/;
-const REPO = /github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/;
 
 /**
  * Checks the token against the repo with GitHub (straight from this browser), encrypts it here to the render
@@ -19,13 +19,19 @@ const REPO = /github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/;
 export async function saveRepoToken(token: string, repoUrl: string, setup: RepoTokenSetup): Promise<string | null> {
   if (!setup.publicKey) return "Private repos aren't set up on this server yet.";
   if (!TOKEN.test(token)) return "That doesn't look like a GitHub token. It starts with github_pat_ (or ghp_ for classic tokens).";
-  const repo = repoUrl.match(REPO);
-  if (!repo) return "Enter the repo URL like https://github.com/owner/repo";
-  const check = await fetch(`https://api.github.com/repos/${repo[1]}/${repo[2]}`, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
-  });
+  // A repo, or a pull request, release or comparison in it.
+  const source = parseGithubSource(canonicalGithubUrl(repoUrl));
+  if (!source) return "Enter a GitHub link like https://github.com/owner/repo, or a pull request or release in it.";
+  const headers = { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" };
+  const check = await fetch(`https://api.github.com/repos/${source.slug}`, { headers });
   if (check.status === 401) return "GitHub rejected this token. It may be mistyped, expired or revoked.";
-  if (!check.ok) return `This token can't read ${repo[1]}/${repo[2]}. Give it Contents: read-only access to that repository.`;
+  if (!check.ok) return `This token can't read ${source.slug}. Give it Contents: read-only access to that repository.`;
+  // A pull request needs one more permission; check it now rather than at render time.
+  if (source.change?.kind === "pull") {
+    const pull = await fetch(`https://api.github.com/repos/${source.slug}/pulls/${source.change.number}`, { headers });
+    if (pull.status === 404) return `We couldn't read pull request #${source.change.number} in ${source.slug}. Check the link, and give the token Pull requests: read-only access too.`;
+    if (!pull.ok) return `This token can't read pull requests in ${source.slug}. Give it Pull requests: read-only access too.`;
+  }
 
   const sealed = await sealToken(token, setup.userId, setup.publicKey);
   const res = await fetch("/api/repo-token", {
@@ -99,7 +105,8 @@ export function PrivateRepoToken({
         <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-gray-1000 underline underline-offset-2">
           fine-grained token <ExternalLink className="size-3" />
         </a>{" "}
-        with access to this repository and <span className="text-gray-1000">Contents: read-only</span>, nothing else.
+        with access to this repository and <span className="text-gray-1000">Contents: read-only</span> (and{" "}
+        <span className="text-gray-1000">Pull requests: read-only</span> for a pull request link), nothing else.
       </p>
       <p className="mt-1.5 flex items-start gap-2 text-[13px] text-gray-900">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-green-900" />

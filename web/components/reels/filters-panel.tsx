@@ -1,20 +1,19 @@
 "use client";
+import { NO_EFFECT } from "@launchreel/core/effects";
 import { FILTERS, REEL_FILTERS, type ReelFilter, type ReelPicture } from "@launchreel/core/picture";
 import { cn } from "@/lib/cn";
 import { PictureLayers, useVideoFilter } from "./picture-layers";
 
-const STILL = { zoom: 0, dx: 0, dy: 0, white: 0, black: 0, blur: 0, rgb: 0, noise: 0 };
-
 /** The sample frame through a filter, as the render colours it. */
 function FilterThumb({ filter }: { filter: ReelFilter }) {
   const picture: ReelPicture = { filter, strength: 1, grain: false, vignette: false, letterbox: false };
-  const { filter: css, svg } = useVideoFilter(picture, STILL, 80);
+  const { filter: css, svg } = useVideoFilter(picture, NO_EFFECT, 80);
   return (
     <span className="relative block aspect-[9/16] w-full overflow-hidden rounded-md bg-[#1a1d24]">
       {svg}
       {/* eslint-disable-next-line @next/next/no-img-element -- the shared sample still */}
       <img src="/reels/sample-frame.jpg" alt="" className="absolute inset-0 size-full object-cover" style={{ filter: css }} loading="lazy" decoding="async" />
-      <PictureLayers picture={picture} fx={STILL} />
+      <PictureLayers picture={picture} fx={NO_EFFECT} />
     </span>
   );
 }

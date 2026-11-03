@@ -7,6 +7,7 @@ const FRAME: Record<string, string> = {
   landscape: "aspect-video w-full",
   vertical: "aspect-[9/16] h-[min(70vh,640px)] mx-auto",
   square: "aspect-square h-[min(70vh,560px)] mx-auto max-w-full",
+  portrait: "aspect-[4/5] h-[min(70vh,600px)] mx-auto max-w-full",
 };
 
 export function VideoPreview({ job }: { job: Job }) {

@@ -1,7 +1,8 @@
 // The reel editor's files in R2, written by the render Worker after a reel renders: jobs/<id>/edit.json (the reel's
-// decisions, a ReelEdit) and jobs/<id>/preview.mp4 (a small clean copy, no captions, to preview edits on). Both are
-// private: only the owner-checked routes under /api/reels/[id] read them. Demo mode uses a sample instead.
-import { parseReelEdit, type ReelEdit } from "@launchreel/core/reel";
+// decisions, a ReelEdit) and jobs/<id>/preview.mp4 (a small clean copy, no captions, to preview edits on); for a
+// product video also jobs/<id>/voice.m4a (its narration alone, played under a new bed). All private: only the
+// owner-checked routes under /api/reels/[id] read them. Demo mode uses a sample instead.
+import { parseReelEdit, voiceKey, type ReelEdit } from "@launchreel/core/reel";
 import { isDemo } from "./demo";
 import demoEdit from "./demo-edit.json";
 import { videoBucket } from "./reel-uploads";
@@ -36,16 +37,20 @@ export async function writeEdit(jobId: string, edit: ReelEdit) {
   await (await videoBucket()).put(editKey(jobId), JSON.stringify(edit), { httpMetadata: { contentType: "application/json" } });
 }
 
-/** A reel's clean preview as a response (whole, or the range the request asks for), or null when there's none. */
-export async function previewResponse(jobId: string, request: Request): Promise<Response | null> {
-  const headers = new Headers({ "content-type": "video/mp4", "accept-ranges": "bytes", "cache-control": "private, max-age=3600" });
+/**
+ * A reel's clean preview (or with `track` "voice", a product video's narration alone) as a response (whole, or the
+ * range the request asks for), or null when there's none.
+ */
+export async function previewResponse(jobId: string, request: Request, track: "preview" | "voice" = "preview"): Promise<Response | null> {
+  const key = track === "voice" ? voiceKey(jobId) : previewKey(jobId);
+  const headers = new Headers({ "content-type": track === "voice" ? "audio/mp4" : "video/mp4", "accept-ranges": "bytes", "cache-control": "private, max-age=3600" });
   if (dev) {
-    const res = await devFile(previewKey(jobId), { headers: request.headers.has("range") ? { range: request.headers.get("range")! } : {} });
+    const res = await devFile(key, { headers: request.headers.has("range") ? { range: request.headers.get("range")! } : {} });
     if (!res.ok) return null;
     for (const name of ["content-range", "content-length", "etag"]) if (res.headers.has(name)) headers.set(name, res.headers.get(name)!);
     return new Response(res.body, { status: res.status, headers });
   }
-  const object = await (await videoBucket()).get(previewKey(jobId), { range: request.headers });
+  const object = await (await videoBucket()).get(key, { range: request.headers });
   if (!object) return null;
   if (object.httpEtag) headers.set("etag", object.httpEtag);
   const offset = object.range?.offset;

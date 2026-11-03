@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { creditsFor, grantCredits, MUSIC_CHOICES, QUALITIES, spendCredits, templateById, VIDEO_TYPES, VOICE_IDS, type MusicChoice, type Quality, type VideoType } from "@launchreel/core";
+import { creditsFor, grantCredits, MUSIC_CHOICES, QUALITIES, spendCredits, templateById, VIDEO_FORMATS, VIDEO_TYPES, VOICE_IDS, type MusicChoice, type Quality, type VideoFormat, type VideoType } from "@launchreel/core";
 import { getDb, startRender } from "@/lib/db";
-import { githubVisibility, websiteProblem } from "@/lib/preflight";
+import { canonicalGithubUrl, githubLinkProblem } from "@launchreel/core/github";
+import { githubChangeProblem, githubVisibility, websiteProblem } from "@/lib/preflight";
 import { isDemo } from "@/lib/demo";
 import { STUDIO_SOON_ERROR, studioAvailable } from "@/lib/studio";
 import { requireUser } from "@/lib/user";
 
-const GITHUB_REPO = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/;
-
 const Body = z.object({
   sourceUrl: z.string().url().max(500),
   tone: z.string().max(120).optional(),
-  format: z.enum(["landscape", "vertical", "square"]).default("landscape"),
+  format: z.enum(VIDEO_FORMATS as [VideoFormat, ...VideoFormat[]]).default("landscape"),
   durationSec: z.number().int().min(10).max(90).default(20), // up to 30s: teaser; 60–90s: full launch video
   notes: z.string().max(1000).optional(),
   videoType: z.enum(VIDEO_TYPES as [VideoType, ...VideoType[]]).default("launch"),
@@ -52,10 +51,12 @@ export async function POST(req: Request) {
   if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(url.hostname) || /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname)) {
     return NextResponse.json({ error: "Use a public domain" }, { status: 400 });
   }
-  const isGithub = url.hostname === "github.com";
-  if (isGithub && !GITHUB_REPO.test(body.sourceUrl)) {
-    return NextResponse.json({ error: "Use a repo URL like https://github.com/owner/repo" }, { status: 400 });
-  }
+  // GitHub: a repo, or a pull request, release or comparison (a video about that change), stored as one canonical
+  // link (no /files tab, query or #fragment) that the runner reads the same way (@launchreel/core/github).
+  const isGithub = url.hostname === "github.com" || url.hostname === "www.github.com";
+  const sourceUrl = isGithub ? canonicalGithubUrl(body.sourceUrl) : body.sourceUrl;
+  const githubProblem = isGithub ? githubLinkProblem(sourceUrl) : null;
+  if (githubProblem) return NextResponse.json({ error: githubProblem }, { status: 400 });
 
   if (body.quality === "studio" && !(await studioAvailable())) return NextResponse.json({ error: STUDIO_SOON_ERROR }, { status: 400 });
 
@@ -64,11 +65,14 @@ export async function POST(req: Request) {
   // With a token saved, an inconclusive check also uses it, since the token can read public repos too.
   let privateRepo = false;
   if (isGithub) {
-    const visibility = await githubVisibility(body.sourceUrl);
+    const visibility = await githubVisibility(sourceUrl);
     const hasToken = visibility !== "public" && (await db.repoToken.count({ where: { userId: user.id } })) > 0;
     if (visibility === "hidden" && !hasToken) {
       return NextResponse.json({ error: "We couldn't find that repository. If it's private, paste a GitHub token in the field under the repo link." }, { status: 422 });
     }
+    // A public repo's pull request, tag or branch that GitHub says isn't there (private ones are checked at render).
+    const missing = visibility === "public" ? await githubChangeProblem(sourceUrl) : null;
+    if (missing) return NextResponse.json({ error: missing }, { status: 422 });
     privateRepo = hasToken;
   } else {
     const problem = await websiteProblem(body.sourceUrl);
@@ -84,7 +88,7 @@ export async function POST(req: Request) {
     data: {
       userId: user.id,
       sourceType: isGithub ? "GITHUB" : "WEBSITE",
-      sourceUrl: body.sourceUrl,
+      sourceUrl,
       tone: body.tone,
       format: body.format,
       durationSec: body.durationSec,

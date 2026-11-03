@@ -25,6 +25,7 @@
     "./contract": "./src/contract.ts",
     "./engines": "./src/engines.ts",
     "./repo-token": "./src/repo-token.ts",
+    "./github": "./src/github.ts",
     "./voices": "./src/voices.ts",
     "./templates": "./src/templates.ts",
     "./recipes": "./src/recipes.ts",
@@ -40,6 +41,8 @@
     "./edit-styles": "./src/edit-styles.ts",
     "./reel-chat": "./src/reel-chat.ts",
     "./project-chat": "./src/project-chat.ts",
-    "./broll": "./src/broll.ts"
+    "./broll": "./src/broll.ts",
+    "./transitions": "./src/transitions.ts",
+    "./caption-templates": "./src/caption-templates.ts"
   }
 }

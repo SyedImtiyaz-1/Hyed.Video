@@ -9,24 +9,28 @@
 // Output: /workspace/result.json    (a JobResult: outcome, usage and cost)
 //         /workspace/out/brag.mp4, brag.jpg, captions.srt
 //
+// Product videos (spec.video) go through here too, after the agent: their words come from the narration's script, not
+// speech recognition, nothing is planned or cut, and their own soundtrack stays unless the edit changes the music.
+//
 // Word timings come from HYPED_TIMINGS_URL (the render Worker's speech recognition) and the plan from OPENAI_BASE_URL
 // (the Worker's proxy adds the key). On a laptop both fall back to OpenAI with OPENAI_API_KEY. Failures a customer can
 // fix start with the phrases reelError() knows (packages/core/src/reel.ts): "Too long", "Not a video", "No speech",
 // "Unsupported language", "Upload missing".
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { JobResult } from "@launchreel/core/contract";
 import { llmCostUsd, VOICE_TIMINGS_USD_PER_MINUTE, type TokenUsage } from "@launchreel/core/pricing";
-import { boxAlpha, CAPTION_STROKES, captionLimits, captionLines, captionPlace, captionWidth, captionY, cueOf, resolveLook, REVEALING_ANIMATIONS, SHADOW, TYPEWRITER_LETTER, weightOf, WEIGHTED_FONTS, wordMotion, type CaptionFont, type CaptionLine, type CaptionLook, type CaptionWeight, type ReelLookChanges } from "@launchreel/core/captions";
-import { channelExpr, channelSteps, EFFECTS, enableExpr, type PlacedEffect } from "@launchreel/core/effects";
+import { boxAlpha, CAPTION_STROKES, captionLimits, captionLines, captionPlace, captionWidth, captionY, cueOf, GHOST_OPACITY, KEY_GLOW, keyFontScale, LINE_SLIDES, LOCKUP_LEADING, lockupKeys, lockupMaxHeight, lockupRows, resolveLook, REVEALING_ANIMATIONS, SHADOW, TYPEWRITER_LETTER, WAVE, weightOf, WEIGHTED_FONTS, WORD_KEYS, wordKeyValues, wordMotion, type CaptionFont, type CaptionLine, type CaptionLook, type CaptionWeight, type ReelLookChanges, type WordKey } from "@launchreel/core/captions";
+import { channelExpr, channelSteps, channelWindows, EFFECTS, enableExpr, LEAK, type PlacedEffect } from "@launchreel/core/effects";
 import { EDIT_STYLES, STRENGTH_CUT_GAP, STRENGTH_DENSITY, STRENGTH_ZOOM } from "@launchreel/core/edit-styles";
 import { GRAIN, gradeMatrix, LETTERBOX, parsePicture, VHS, VIGNETTE, type ReelPicture } from "@launchreel/core/picture";
-import { EMOJI_SIZE, parseReelEdit, ZOOM_AMOUNT, type ReelEdit, type ReelFont, type ReelLanguage, type ReelOptions, type ReelSpec, type ReelStyle } from "@launchreel/core/reel";
+import { bigColorOf, bigWords, bigWordText, blankEdit, captionsOn, cleanWordText, EMOJI_SIZE, parseReelEdit, ZOOM_AMOUNT, type BigCasing, type ReelEdit, type ReelFont, type ReelLanguage, type ReelOptions, type ReelSpec, type ReelStyle } from "@launchreel/core/reel";
 import { emojiShows, HOOK_END, HOOK_SOUND, HOOK_START, punchExpr, soundCues, zoomAim, zoomWindows, type SoundCue, type ZoomWindow } from "@launchreel/core/timeline";
 import { cutClock, onCutTimeline, parseTrims, pauseTrims, trimmedWords, trimTotals, type CutClock, type Trim } from "@launchreel/core/trims";
-import { musicGainDb, REEL_MUSIC, type ReelAudio } from "@launchreel/core/music-beds";
+import { libraryBed, MUSIC_DEFAULT_VOLUME, musicGainDb, ORIGINAL_MUSIC, REEL_MUSIC, type ReelAudio } from "@launchreel/core/music-beds";
 import { BROLL_FADE, parseClip, type BrollClip, type BrollShot } from "@launchreel/core/broll";
+import { transitionEffects, transitionJoints, type TransitionJoint } from "@launchreel/core/transitions";
 import { FACES, type Face, type FaceName } from "./fonts.ts";
 import { bare, endsSentence, master, POWER, round, srtCues, STOP, strongestWord, WEAK, type Group, type PhraseLimits, type Word } from "./media.ts";
 
@@ -479,6 +483,7 @@ function autoEdit(words: Word[], lines: CaptionLine[], plan: Plan, options: Reel
     audio: { clean: true, music: styled.music ? { ...styled.music } : null },
     // Stock B-roll is found after the plan (findBroll), once the cut clock is known.
     broll: [],
+    transitions: [],
   };
 }
 
@@ -711,6 +716,8 @@ const DISPLAY_FACES: Record<Exclude<CaptionFont, "inter" | "montserrat">, FaceNa
   anton: "Anton", abril: "Abril Fatface", archivo: "Archivo Black", dmserif: "DM Serif Display", kaushan: "Kaushan Script", marker: "Permanent Marker",
   poppins: "Poppins ExtraBold", tiktok: "TikTok Sans", roboto: "Roboto Black", rubik: "Rubik Black", bebas: "Bebas Neue", oswald: "Oswald",
   bangers: "Bangers", luckiest: "Luckiest Guy", instrument: "Instrument Serif", caveat: "Caveat",
+  playfair: "Playfair Display", instrumentupright: "Instrument Serif Upright", archivowide: "Archivo Expanded ExtraBold", fredoka: "Fredoka", lilita: "Lilita One",
+  poppinsitalic: "Poppins", dancing: "Dancing Script", greatvibes: "Great Vibes", gochi: "Gochi Hand", courier: "Courier Prime", pixel: "Pixelify Sans Medium", pressstart: "Press Start 2P",
 };
 /** A font's face in a weight (the nearest it has, for Inter and Montserrat; the one face, for the others). */
 const faceIn = (font: CaptionFont, weight: CaptionWeight): Face => {
@@ -781,6 +788,60 @@ function lineBreakBy(words: string[], widthOf: (i: number) => number, space: num
   return { lines: [words.slice(0, best.k), words.slice(best.k)], scale: Math.min(1, max / best.widest) };
 }
 
+/** The characters libass spaces out: all but combining marks (which advance() leaves out too). */
+const letterCount = (text: string) => [...text].filter((ch) => !/\p{M}/u.test(ch)).length;
+
+/**
+ * advance() with letter spacing, a share of the font size. libass (0.15) adds \fsp after every character, spaces and the
+ * last letter included, and lines text up on that; \fscx scales it, \fs doesn't (it's pixels).
+ */
+function spacedAdvance(face: Face, text: string, size: number, tracking: number) {
+  return tracking ? advance(face, text, size) + letterCount(text) * tracking * size : advance(face, text, size);
+}
+
+/**
+ * lineBreakBy for words with gaps of their own after them (a space and the word's last letter spacing, which differs by
+ * font and size): one or two balanced lines that fit `max` wide, as where the second line starts (0 for one line), and
+ * the shrink when a line is still too wide.
+ */
+function lineBreakGaps(count: number, widthOf: (i: number) => number, gapAfter: (i: number) => number, max: number): { second: number; scale: number } {
+  const width = (from: number, to: number) => {
+    let w = 0;
+    for (let i = from; i < to; i++) w += widthOf(i) + (i + 1 < to ? gapAfter(i) : 0);
+    return w;
+  };
+  const all = width(0, count);
+  if (count < 2 || all <= max) return { second: 0, scale: Math.min(1, max / all) };
+  let best = { k: 1, widest: Infinity };
+  for (let k = 1; k < count; k++) {
+    const widest = Math.max(width(0, k), width(k, count));
+    if (widest < best.widest) best = { k, widest };
+  }
+  return { second: best.k, scale: Math.min(1, max / best.widest) };
+}
+
+/**
+ * A line of event text with no letter spacing after its last letter (\fsp0 on it): libass would add it and line the
+ * line up on it, so a spaced-out line would sit off centre and a box around it would run long on the right.
+ */
+function untrail(text: string): string {
+  let at = -1;
+  let inTags = false;
+  for (let n = 0; n < text.length; n++) {
+    const c = text[n];
+    if (c === "{") inTags = true;
+    else if (c === "}") inTags = false;
+    else if (!inTags && !/\p{M}/u.test(c) && !(c >= "\uDC00" && c <= "\uDFFF")) at = n;
+  }
+  return at < 0 ? text : `${text.slice(0, at)}{\\fsp0}${text.slice(at)}`;
+}
+
+/** Tags that switch text from one face to another: its family, and italics when one is italic and the other isn't. */
+const switchFace = (to: Face, from: Face) => `\\fn${to.family}${to.italic !== from.italic ? `\\i${to.italic ? 1 : 0}` : ""}`;
+
+/** A number for an ASS tag, to the hundredth. */
+const tagNumber = (v: number) => String(Math.round(v * 100) / 100);
+
 /** An ASS alpha (00 opaque, FF clear) as a tag value. */
 const hexAlpha = (alpha: number) => `&H${alpha.toString(16).padStart(2, "0").toUpperCase()}&`;
 
@@ -793,6 +854,10 @@ function roundedRect(x0: number, y0: number, x1: number, y1: number, r: number) 
 
 type Frame = { width: number; height: number };
 type EmojiShot = { emoji: string; start: number; end: number; x: number; y: number; size: number };
+
+/** "#RRGGBB" mixed toward another by `amount` (0-1), as "#RRGGBB". */
+const mixHex = (from: string, to: string, amount: number) =>
+  `#${[1, 3, 5].map((i) => Math.round(parseInt(from.slice(i, i + 2), 16) + (parseInt(to.slice(i, i + 2), 16) - parseInt(from.slice(i, i + 2), 16)) * amount).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 
 /** "#RRGGBB" darkened by `amount` (0-1), as "#RRGGBB". */
 const darker = (hex: string, amount: number) =>
@@ -845,11 +910,38 @@ function placeCaptions(look: CaptionLook, frame: Frame, spec: ReelSpec, markSize
   return { anchor, top: y, bottom: y, hookY, layout };
 }
 
+/** A layer of caption text: the words, their soft shadow, a glow around every word, or one around key words only. */
+type Layer = "words" | "shadow" | "glow" | "keyglow";
+
+/**
+ * A caption event's words: their range and lines (word ranges), where it sits (\an and point), its font size (what a key
+ * glow, a marker band and the animations' blur go by), the size its outline, shadow, glow and halo widths go by (the
+ * look's own: a lockup's rows all keep the small text's widths), the tags after its position (font size, letter spacing,
+ * and a lockup row's outline and shadow), its letter spacing tag (put back after a word without, "" for none), its
+ * outline and shadow widths (put back after a word printed flat), and each word's own scale in it.
+ */
+type Piece = {
+  from: number;
+  to: number;
+  lines: [number, number][];
+  an: number;
+  x: number;
+  y: number;
+  px: number;
+  unit: number;
+  tags: string;
+  spacing: string;
+  outline: string;
+  shadow: string;
+  scaleOf: (i: number) => number;
+};
+
 /**
  * The captions, hook title and watermark as one ASS file for libass, and where each emoji goes, for any caption style.
  * Every word change is its own event, so the spoken word can take the accent colour (and animate) without moving the
  * rest of the line. Boxes, marker bands and bars are drawn shapes on a layer below the words, sized from the fonts'
- * exact measurements; so is a soft shadow, and a glow. `keywords` are the highlighted words; `shows` the emojis, as the
+ * exact measurements; so is a soft shadow, and a glow. A lockup draws each line of its rows as an event of its own
+ * (libass lines up every line of an event alike). `keywords` are the highlighted words; `shows` the emojis, as the
  * timeline times them.
  */
 function buildAss(groups: CaptionLine[], keywords: Set<number>, shows: ReturnType<typeof emojiShows>, emojiStyle: ReelEdit["emojiStyle"], hook: string, look: Look, frame: Frame, spec: ReelSpec, duration: number): { ass: string; emojis: EmojiShot[] } {
@@ -857,19 +949,28 @@ function buildAss(groups: CaptionLine[], keywords: Set<number>, shows: ReturnTyp
   const base = Math.sqrt(W * H);
   const size = Math.round(look.size * base);
   const face = faceOf(look);
-  const keyFace = keyFaceOf(look);
+  // Key words: in a font of their own (sized to the look's capital height, keyFontScale), else the look's key face.
+  const keyFace = look.keyFont ? faceIn(look.keyFont, look.weight) : keyFaceOf(look);
+  const keySizing = keyFontScale(look);
   const boldFace = boldFaceOf(look);
   const hookSize = Math.round(0.056 * base);
   const markSize = Math.round(0.021 * base);
   const { anchor, top, bottom, hookY, layout } = placeCaptions(look, frame, spec, markSize);
-  const max = W * captionWidth(W, H, look.background === "bar");
+  const lockup = look.layout === "lockup";
+  // A lockup's line box goes around the whole block (a lower-third bar would cut across its rows).
+  const background = lockup && look.background === "bar" ? "box" : look.background;
+  const max = W * captionWidth(W, H, background === "bar");
   const x = Math.round(W / 2);
+  // Lined up at the left: from the caption area's left edge.
+  const leftEdge = Math.round(W / 2 - max / 2);
   const stroke = CAPTION_STROKES[look.style];
   const hollow = look.fill === "hollow";
-  const karaoke = look.fill === "karaoke";
+  // Karaoke fills a line as it's said; a lockup's rows take the highlight colour instead (resolveLook sees to it too).
+  const karaoke = look.fill === "karaoke" && !lockup;
   const boldFill = look.fill === "bold" && boldFace !== face;
   const revealing = REVEALING_ANIMATIONS.includes(look.animation);
   const keyScale = look.keyScale;
+  const tracking = look.tracking;
   // Around and under the letters: the customer's stroke and shadow when they chose them, else the style's.
   const outline = (look.strokeWidth ?? (hollow ? 0.045 : stroke.outline)) * size;
   const outlineAlpha = look.strokeWidth !== undefined ? 0 : stroke.halo;
@@ -889,182 +990,429 @@ function buildAss(groups: CaptionLine[], keywords: Set<number>, shows: ReturnTyp
     if (line) events.push(line);
   };
   // A soft halo is the outline blurred; a glow is a wide blurred outline in the accent colour, drawn underneath.
-  const soft = look.stroke === "soft" ? `\\blur${Math.max(3, Math.round(size * 0.14))}` : "";
+  const soft = look.stroke === "soft";
   const emojiSize = even(EMOJI_SIZE[emojiStyle.size] * base);
   // Each line's height on screen, for the emojis beside it.
   const blocks: number[] = [];
-  const space = advance(face, " ", size);
+  const space = spacedAdvance(face, " ", size, tracking);
   const lineHeight = size;
   const ascent = (face.asc / (face.asc + face.desc)) * size;
   const capHeight = (glyphOf(face, "H")[4] * size) / (face.asc + face.desc);
-  // A word's normal alphas, and none at all: for words that come in (typewriter, reveal, rise) and the soft shadow.
-  const alphaOn = `\\1a${hexAlpha(hollow ? 0xff : 0)}\\3a${hexAlpha(outlineAlpha)}\\4a${hexAlpha(shadowAlpha)}`;
+  const slide = LINE_SLIDES[look.animation];
   const alphaOff = "\\1a&HFF&\\3a&HFF&\\4a&HFF&";
   const scaleTag = (percent: number) => `\\fscx${Math.round(percent)}\\fscy${Math.round(percent)}`;
+  const hollowFill = hollow ? "\\1a&HFF&" : "";
+  const alphaTags = (alphas: readonly number[]) => `\\1a${hexAlpha(alphas[0])}\\3a${hexAlpha(alphas[1])}\\4a${hexAlpha(alphas[2])}`;
+  // Each layer's visibility at rest (fill, outline, shadow; 0 opaque): the words; their soft shadow (its fill); a glow
+  // (its outline), round key words only for the key glow.
+  const restAlphas = (layer: Layer, key: boolean): readonly number[] =>
+    layer === "words" ? [hollow ? 0xff : 0, outlineAlpha, shadowAlpha] : layer === "shadow" ? [0x40, 0xff, 0xff] : layer === "glow" ? [0xff, 0x30, 0xff] : key ? [0xff, KEY_GLOW.alpha, 0xff] : [0xff, 0xff, 0xff];
+  // The newer animations fade from and back to these (the words' fill even when hollow, as they always have).
+  const keyAlphas = (layer: Layer, key: boolean): readonly number[] => (layer === "words" ? [0, outlineAlpha, shadowAlpha] : restAlphas(layer, key));
+  // With ghost, words still to come: every layer at GHOST_OPACITY of its own visibility.
+  const ghostAlpha = (a: number) => Math.round(255 - (255 - a) * GHOST_OPACITY);
+  // Each layer's blur at rest, for a font size: the soft halo, the soft shadow, a glow.
+  const layerBlur = (layer: Layer, px: number) => (layer === "words" ? (soft ? Math.max(3, Math.round(px * 0.14)) : 0) : layer === "shadow" ? Math.round(SHADOW.blur * px) : Math.round((layer === "keyglow" ? KEY_GLOW.blur : 0.12) * px));
 
   groups.forEach((g, gi) => {
-    const words = g.words.map((w) => shown(w.text, look));
-    const isKey = (i: number) => keywords.has(g.words[i].i);
-    const wordScale = (i: number) => (isKey(i) ? keyScale : 1);
+    const marked = g.words.flatMap((w, i) => (keywords.has(w.i) ? [i] : []));
+    const plain = g.words.map((w) => shown(w.text, look));
+    // A lockup always has a big word: the line's key words, else its longest.
+    const keyList = lockup ? lockupKeys(plain, marked) : marked;
+    const keys = new Set(keyList);
+    const isKey = (i: number) => keys.has(i);
+    const keyCasing = look.keyCasing;
+    const words = keyCasing ? plain.map((w, i) => (isKey(i) ? shown(g.words[i].text, { ...look, casing: keyCasing }) : w)) : plain;
+    // Key words in a font of their own keep its letter spacing; every other word is spaced by the look's tracking.
+    const ownFont = (i: number) => !(look.keyFont && isKey(i));
+    const spacingOf = (i: number) => (ownFont(i) ? tracking : 0);
     const faceFor = (i: number) => (isKey(i) && keyFace !== face ? keyFace : face);
-    // Lines are fitted to the words at their sizes, in the heavier face when the spoken word turns bold (the widest).
-    const { lines, scale } =
-      keyScale === 1 && !boldFill ? lineBreak(words, face, size, max) : lineBreakBy(words, (i) => advance(boldFill ? boldFace : face, words[i], size) * wordScale(i), space, max);
-    const fs = scale < 1 ? `\\fs${Math.floor(size * scale)}` : "";
-    const pos = anchor === "top" ? `\\an8\\pos(${x},${top})` : `\\an2\\pos(${x},${bottom})`;
-    const breaks = new Set<number>(lines.length > 1 ? [lines[0].length] : []);
-    const join = (parts: string[]) => parts.map((p, i) => (i > 0 ? (breaks.has(i) ? "\\N" : " ") : "") + p).join("");
-    const fad = look.animation === "none" || revealing ? "" : look.animation === "fade" ? "\\fad(120,0)" : "\\fad(60,0)";
+    // The spoken word turns bold in the look's own font, and lines are fitted to the bold one (the widest).
+    const faceAt = (i: number, k: number) => (boldFill && i === k && ownFont(i) ? boldFace : faceFor(i));
+    const fitFace = (i: number) => (boldFill && ownFont(i) ? boldFace : faceFor(i));
+    // A word's width at font size `px` with its letter spacing (after its last letter too, as libass adds it), and that
+    // last letter's spacing.
+    const widthAt = (i: number, f: Face, px: number) => spacedAdvance(f, words[i], px, spacingOf(i));
+    const trailAt = (i: number, px: number) => (letterCount(words[i]) ? spacingOf(i) * px : 0);
+    const fad = look.animation === "none" || revealing ? "" : look.animation === "fade" ? "\\fad(120,0)" : slide ? `\\fad(${slide.ms},0)` : "\\fad(60,0)";
+    // The size a slide in goes by: the font size, or a lockup's.
+    let unit = size;
+    // Where an event starting with the line sits: its place, or (sliding in) moving there from below or above.
+    const placeAt = (an: number, px: number, py: number, first: boolean) =>
+      slide && first ? `\\an${an}\\move(${px},${Math.round(py + slide.dy * unit)},${px},${py},0,${slide.ms})` : `\\an${an}\\pos(${px},${py})`;
+    // Shapes behind the words: a box, a lower-third bar with an accent stripe, a marker band (fading in with its word).
+    const shape = (start: number, end: number, path: string, color: string, alpha: number, layer = 0, fades = true) =>
+      dialogue(start, end, "Caption", `{${placeAt(7, 0, 0, start === g.start)}\\p1\\bord0\\shad0\\1c${tagColor(color)}\\1a&H${alpha.toString(16).padStart(2, "0").toUpperCase()}&${fades ? fad : ""}}${path}{\\p0}`, layer);
 
-    // Where each word sits, for shapes behind the words: its line, and its left and right edges. A line with a bigger
-    // key word on it is taller (libass sizes a line to its biggest letters).
-    const lineOf = (i: number) => (lines.length > 1 && i >= lines[0].length ? 1 : 0);
-    const span = (l: number) => (l === 0 ? [0, lines[0].length] : [lines[0].length, words.length]);
-    const lineScale = (l: number) => {
-      const [from, to] = span(l);
-      let most = 1;
-      for (let i = from; i < to; i++) most = Math.max(most, wordScale(i));
-      return most;
-    };
-    const faceAt = (i: number, k: number) => (boldFill && i === k ? boldFace : faceFor(i));
-    const wordWidth = (i: number, k: number) => advance(faceAt(i, k), words[i], size) * wordScale(i);
-    const lineWidth = (l: number, k = -1) => {
-      const [from, to] = span(l);
-      let w = 0;
-      for (let i = from; i < to; i++) w += wordWidth(i, k) + (i > from ? space : 0);
-      return w * scale;
-    };
-    const lineTop = (l: number) => {
-      const heights = lines.map((_, m) => lineHeight * scale * lineScale(m));
-      if (anchor === "top") return top + heights.slice(0, l).reduce((a, b) => a + b, 0);
-      return bottom - heights.slice(l).reduce((a, b) => a + b, 0);
-    };
-    blocks[gi] = lines.reduce((h, _, l) => h + lineHeight * scale * lineScale(l), 0);
-    const wordBox = (i: number, k: number) => {
-      const l = lineOf(i);
-      const [from] = span(l);
-      let left = x - lineWidth(l, k) / 2;
-      for (let j = from; j < i; j++) left += (wordWidth(j, k) + space) * scale;
-      return { l, x0: left, x1: left + wordWidth(i, k) * scale };
-    };
+    // The line's events, and the marker band behind word j while word k is said.
+    let pieces: Piece[] = [];
+    let bandAt: (j: number, k: number) => string = () => "";
+    if (!lockup) {
+      const wordScale = (i: number) => (isKey(i) ? keyScale * keySizing : 1);
+      // Lines are fitted to the words at their sizes, in the heavier face when the spoken word turns bold (the widest),
+      // and in key words' own font and with letter spacing, when they have them.
+      const spaced = () => {
+        const fit = lineBreakGaps(words.length, (i) => (widthAt(i, fitFace(i), size) - trailAt(i, size)) * wordScale(i), (i) => trailAt(i, size) * wordScale(i) + space, max);
+        return { lines: fit.second ? [words.slice(0, fit.second), words.slice(fit.second)] : [words], scale: fit.scale };
+      };
+      const { lines, scale } =
+        look.keyFont || tracking ? spaced() : keyScale === 1 && !boldFill ? lineBreak(words, face, size, max) : lineBreakBy(words, (i) => advance(boldFill ? boldFace : face, words[i], size) * wordScale(i), space, max);
+      const alignLeft = look.align === "left";
+      const lineX = alignLeft ? leftEdge : x;
+      const spacing = tracking ? `\\fsp${tagNumber(tracking * size * scale)}` : "";
+      pieces = [
+        {
+          from: 0,
+          to: words.length,
+          lines: lines.length > 1 ? [[0, lines[0].length], [lines[0].length, words.length]] : [[0, words.length]],
+          an: (anchor === "top" ? 8 : 2) - (alignLeft ? 1 : 0),
+          x: lineX,
+          y: anchor === "top" ? top : bottom,
+          px: size,
+          unit: size,
+          tags: `${scale < 1 ? `\\fs${Math.floor(size * scale)}` : ""}${spacing}`,
+          spacing,
+          outline: outline.toFixed(1),
+          shadow: shadowDepth.toFixed(1),
+          scaleOf: wordScale,
+        },
+      ];
 
-    // Shapes behind the words, for the whole line: a box, or a lower-third bar with an accent stripe.
-    const shape = (start: number, end: number, path: string, color: string, alpha: number, layer = 0) =>
-      dialogue(start, end, "Caption", `{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c${tagColor(color)}\\1a&H${alpha.toString(16).padStart(2, "0").toUpperCase()}&${fad}}${path}{\\p0}`, layer);
-    if (look.background === "box") {
-      const pad = [0.28 * size * scale, 0.14 * size * scale];
-      const widest = Math.max(...lines.map((_, l) => lineWidth(l)));
-      shape(g.start, g.end, roundedRect(x - widest / 2 - pad[0], lineTop(0) + 0.06 * size - pad[1], x + widest / 2 + pad[0], lineTop(lines.length - 1) + lineHeight * scale * lineScale(lines.length - 1) - 0.02 * size + pad[1], 0.22 * size), look.backgroundColor, boxAlpha(look.backgroundColor));
-    } else if (look.background === "bar") {
-      const [y0, y1] = [lineTop(0) - 0.2 * size, lineTop(lines.length - 1) + lineHeight * scale * lineScale(lines.length - 1) + 0.2 * size];
-      shape(g.start, g.end, roundedRect(W * 0.05, y0, W * 0.95, y1, 0.12 * size), look.backgroundColor, 0x20);
-      shape(g.start, g.end, roundedRect(W * 0.05, y0, W * 0.05 + 0.16 * size, y1, 0.06 * size), look.accent, 0, 0);
+      // Where each word sits, for shapes behind the words: its line, and its left and right edges. A line with a bigger
+      // key word on it is taller (libass sizes a line to its biggest letters, in whatever font).
+      const lineOf = (i: number) => (lines.length > 1 && i >= lines[0].length ? 1 : 0);
+      const span = (l: number) => (l === 0 ? [0, lines[0].length] : [lines[0].length, words.length]);
+      const lineScale = (l: number) => {
+        const [from, to] = span(l);
+        let most = 1;
+        for (let i = from; i < to; i++) most = Math.max(most, wordScale(i));
+        return most;
+      };
+      const ascentOf = (f: Face) => f.asc / (f.asc + f.desc);
+      const reach = (l: number) => {
+        const [from, to] = span(l);
+        let up = to - from > 1 ? ascentOf(face) * size : 0;
+        let down = to - from > 1 ? (1 - ascentOf(face)) * size : 0;
+        for (let i = from; i < to; i++) {
+          up = Math.max(up, ascentOf(faceFor(i)) * size * wordScale(i));
+          down = Math.max(down, (1 - ascentOf(faceFor(i))) * size * wordScale(i));
+        }
+        return { up, down };
+      };
+      const lineHeightOf = (l: number) => (look.keyFont ? (reach(l).up + reach(l).down) * scale : lineHeight * scale * lineScale(l));
+      const lineAscentOf = (l: number) => (look.keyFont ? reach(l).up * scale : ascent * scale * lineScale(l));
+      const wordWidth = (i: number, k: number) => widthAt(i, faceAt(i, k), size) * wordScale(i);
+      const lineWidth = (l: number, k = -1) => {
+        const [from, to] = span(l);
+        let w = 0;
+        for (let i = from; i < to; i++) w += wordWidth(i, k) + (i > from ? space : 0);
+        return (w - trailAt(to - 1, size) * wordScale(to - 1)) * scale;
+      };
+      const lineTop = (l: number) => {
+        const heights = lines.map((_, m) => lineHeightOf(m));
+        if (anchor === "top") return top + heights.slice(0, l).reduce((a, b) => a + b, 0);
+        return bottom - heights.slice(l).reduce((a, b) => a + b, 0);
+      };
+      blocks[gi] = lines.reduce((h, _, l) => h + lineHeightOf(l), 0);
+      const wordBox = (i: number, k: number) => {
+        const l = lineOf(i);
+        const [from] = span(l);
+        let left = alignLeft ? lineX : x - lineWidth(l, k) / 2;
+        for (let j = from; j < i; j++) left += (wordWidth(j, k) + space) * scale;
+        return { l, x0: left, x1: left + (wordWidth(i, k) - trailAt(i, size) * wordScale(i)) * scale };
+      };
+
+      // Shapes behind the words, for the whole line: a box, or a lower-third bar with an accent stripe.
+      if (background === "box") {
+        const pad = [0.28 * size * scale, 0.14 * size * scale];
+        const widest = Math.max(...lines.map((_, l) => lineWidth(l)));
+        const [x0, x1] = alignLeft ? [lineX - pad[0], lineX + widest + pad[0]] : [x - widest / 2 - pad[0], x + widest / 2 + pad[0]];
+        shape(g.start, g.end, roundedRect(x0, lineTop(0) + 0.06 * size - pad[1], x1, lineTop(lines.length - 1) + lineHeightOf(lines.length - 1) - 0.02 * size + pad[1], 0.22 * size), look.backgroundColor, boxAlpha(look.backgroundColor));
+      } else if (background === "bar") {
+        const [y0, y1] = [lineTop(0) - 0.2 * size, lineTop(lines.length - 1) + lineHeightOf(lines.length - 1) + 0.2 * size];
+        shape(g.start, g.end, roundedRect(W * 0.05, y0, W * 0.95, y1, 0.12 * size), look.backgroundColor, 0x20);
+        shape(g.start, g.end, roundedRect(W * 0.05, y0, W * 0.05 + 0.16 * size, y1, 0.06 * size), look.accent, 0, 0);
+      }
+      // The marker: a rounded band behind a word, from its capitals' top to just under its baseline.
+      bandAt = (j, k) => {
+        const box = wordBox(j, k);
+        const s = wordScale(j);
+        const baseline = lineTop(box.l) + lineAscentOf(box.l);
+        const f = faceAt(j, k);
+        const cap = look.keyFont ? (glyphOf(f, "H")[4] * size) / (f.asc + f.desc) : capHeight;
+        const y = baseline - cap * scale * s;
+        return roundedRect(box.x0 - 0.12 * size * s, y - 0.16 * size * scale * s, box.x1 + 0.12 * size * s, baseline + 0.16 * size * scale * s, 0.14 * size * s);
+      };
+    } else {
+      // A lockup: each key word big on a row of its own, the words between them small on rows above and below. Rows
+      // are fitted at their own sizes: a key word shrunk to the caption width, the others on one or two balanced lines
+      // (shrunk as a line is); then all of it together, when the block is taller than it may be (lockupMaxHeight).
+      const rows = lockupRows(words.length, keyList);
+      const fitted = rows.map((r) => {
+        if (r.key) {
+          const px = size * keyScale * keySizing;
+          const wide = widthAt(r.from, fitFace(r.from), px) - trailAt(r.from, px);
+          return { lines: [[r.from, r.to]] as [number, number][], px: px * Math.min(1, max / wide) };
+        }
+        const fit = lineBreakGaps(r.to - r.from, (m) => widthAt(r.from + m, fitFace(r.from + m), size) - trailAt(r.from + m, size), (m) => trailAt(r.from + m, size) + space, max);
+        const lines: [number, number][] = fit.second ? [[r.from, r.from + fit.second], [r.from + fit.second, r.to]] : [[r.from, r.to]];
+        return { lines, px: size * fit.scale };
+      });
+      const tall = fitted.reduce((h, r) => h + r.lines.length * LOCKUP_LEADING * r.px, 0);
+      const shrink = Math.min(1, (lockupMaxHeight(W, H, look) * H) / tall);
+      unit = size * shrink;
+      // Every line of every row at a whole-pixel size, in a slot LOCKUP_LEADING of it tall (its ASS line box centred in
+      // it), the block hanging from the caption line or standing on it.
+      const spaceAt = (px: number) => spacedAdvance(face, " ", px, tracking);
+      const sized = fitted.flatMap((r, n) => r.lines.map(([a, b]) => ({ a, b, px: Math.max(1, Math.floor(r.px * shrink)), key: rows[n].key, side: rows[n].side })));
+      const lineWidthAt = (ln: { a: number; b: number; px: number }, k: number) => {
+        let w = 0;
+        for (let i = ln.a; i < ln.b; i++) w += widthAt(i, faceAt(i, k), ln.px) + (i > ln.a ? spaceAt(ln.px) : 0);
+        return w - trailAt(ln.b - 1, ln.px);
+      };
+      const block = sized.reduce((h, ln) => h + LOCKUP_LEADING * ln.px, 0);
+      const blockTop = anchor === "top" ? top : bottom - block;
+      blocks[gi] = block;
+      // Centred; from the caption area's left edge; or staggered in a block as wide as its widest line, centred.
+      const widest = Math.max(...sized.map((ln) => lineWidthAt(ln, -1)));
+      const blockLeft = x - widest / 2;
+      let slotTop = blockTop;
+      const placed = sized.map((ln) => {
+        const y = Math.round(slotTop + (LOCKUP_LEADING * ln.px) / 2);
+        slotTop += LOCKUP_LEADING * ln.px;
+        const [an, px]: [number, number] = look.align === "left" ? [4, leftEdge] : look.align === "stagger" ? (ln.side === "left" ? [4, Math.round(blockLeft)] : [6, Math.round(blockLeft + widest)]) : [5, x];
+        return { ...ln, an, x: px, y };
+      });
+      // Every row keeps the small text's outline and shadow (as a bigger key word in a line does: libass doesn't grow
+      // \bord with \fscx), so a big word doesn't turn heavy.
+      const [rowOutline, rowShadow] = [(outline * shrink).toFixed(1), (shadowDepth * shrink).toFixed(1)];
+      pieces = placed.map((ln): Piece => {
+        const spacing = tracking && spacingOf(ln.a) ? `\\fsp${tagNumber(tracking * ln.px)}` : "";
+        return { from: ln.a, to: ln.b, lines: [[ln.a, ln.b]], an: ln.an, x: ln.x, y: ln.y, px: ln.px, unit, tags: `\\fs${ln.px}${spacing}\\bord${rowOutline}\\shad${rowShadow}`, spacing, outline: rowOutline, shadow: rowShadow, scaleOf: () => 1 };
+      });
+      const lineLeft = (ln: (typeof placed)[number], k: number) => (ln.an === 4 ? ln.x : ln.an === 6 ? ln.x - lineWidthAt(ln, k) : ln.x - lineWidthAt(ln, k) / 2);
+
+      // One box around the whole block, as a line's box goes round its lines: from the first row's line box to the
+      // last one's (at their own sizes, so a big last word's descenders stay in). A bar's colour and see-through stay.
+      if (background === "box") {
+        const pad = [0.28 * unit, 0.14 * unit];
+        const x0 = Math.min(...placed.map((ln) => lineLeft(ln, -1)));
+        const x1 = Math.max(...placed.map((ln) => lineLeft(ln, -1) + lineWidthAt(ln, -1)));
+        const [first, last] = [placed[0], placed[placed.length - 1]];
+        const alpha = look.background === "bar" ? 0x20 : boxAlpha(look.backgroundColor);
+        shape(g.start, g.end, roundedRect(x0 - pad[0], first.y - first.px / 2 + 0.06 * first.px - pad[1], x1 + pad[0], last.y + last.px / 2 - 0.02 * last.px + pad[1], 0.22 * size), look.backgroundColor, alpha);
+      }
+      // The marker band behind a word: libass centres a line's box (ascent plus descent, its ASS size) on \an4-6's point.
+      bandAt = (j, k) => {
+        const ln = placed.find((q) => j >= q.a && j < q.b)!;
+        let x0 = lineLeft(ln, k);
+        for (let i = ln.a; i < j; i++) x0 += widthAt(i, faceAt(i, k), ln.px) + spaceAt(ln.px);
+        const x1 = x0 + widthAt(j, faceAt(j, k), ln.px) - trailAt(j, ln.px);
+        const lineFace = ln.key ? faceFor(ln.a) : face;
+        const baseline = ln.y - ln.px / 2 + (lineFace.asc / (lineFace.asc + lineFace.desc)) * ln.px;
+        const f = faceAt(j, k);
+        const cap = (glyphOf(f, "H")[4] * ln.px) / (f.asc + f.desc);
+        return roundedRect(x0 - 0.12 * ln.px, baseline - cap - 0.16 * ln.px, x1 + 0.12 * ln.px, baseline + 0.16 * ln.px, 0.14 * ln.px);
+      };
     }
 
+    // An event's lines: its words' parts, with no letter spacing after a line's last letter.
+    const joinLines = (p: Piece, parts: string[]) =>
+      p.lines
+        .map(([a, b], n) => {
+          const line = parts.slice(a - p.from, b - p.from).join(" ");
+          const trimmed = trailAt(b - 1, 1) ? untrail(line) : line;
+          return n > 0 ? `\\N${p.spacing ? `{${p.spacing}}` : ""}${trimmed}` : trimmed;
+        })
+        .join("");
+
     if (karaoke) {
-      // One event per line: each word fills as it's said (\kf), key words fill in their own colour.
+      // One event per line: each word fills as it's said (\kf), key words fill in their own colour; with ghost, words
+      // are faint until they're said (the colour still to fill too: \2a).
+      const p = pieces[0];
+      const faint = `\\1a${hexAlpha(ghostAlpha(0))}\\2a${hexAlpha(ghostAlpha(0))}\\3a${hexAlpha(ghostAlpha(outlineAlpha))}\\4a${hexAlpha(ghostAlpha(shadowAlpha))}`;
+      const seen = `\\1a&H00&\\2a&H00&\\3a${hexAlpha(outlineAlpha)}\\4a${hexAlpha(shadowAlpha)}`;
       const parts = g.words.map((w, i) => {
         const next = i + 1 < g.words.length ? g.words[i + 1].start : g.end;
         const fill = Math.max(1, Math.round((Math.min(next, w.end + 0.15) - w.start) * 100));
         const wait = Math.max(0, Math.round((next - w.start) * 100) - fill);
-        const big = isKey(i) && keyScale !== 1 ? [scaleTag(100 * keyScale), scaleTag(100)] : ["", ""];
-        const word = isKey(i) ? `{\\1c${tagColor(look.keyword)}${big[0]}}${words[i]}{\\1c${tagColor(look.accent)}${big[1]}}` : words[i];
-        return `{\\kf${fill}}${word}${wait ? `{\\k${wait}}` : ""}`;
+        const s = p.scaleOf(i);
+        const big = s !== 1 ? [scaleTag(100 * s), scaleTag(100)] : ["", ""];
+        const own = faceFor(i) !== face ? [switchFace(faceFor(i), face), switchFace(face, faceFor(i))] : ["", ""];
+        const unspaced = p.spacing && !ownFont(i) ? ["\\fsp0", p.spacing] : ["", ""];
+        const word = isKey(i) ? `{\\1c${tagColor(look.keyword)}${own[0]}${unspaced[0]}${big[0]}}${words[i]}{\\1c${tagColor(look.accent)}${own[1]}${unspaced[1]}${big[1]}}` : words[i];
+        const at = Math.round((w.start - g.start) * 1000);
+        const ghosted = look.ghost && at > 0 ? `{${faint}\\t(${at},${at + 1},${seen})}` : "";
+        return `{\\kf${fill}}${ghosted}${word}${wait ? `{\\k${wait}}` : ""}`;
       });
-      dialogue(g.start, g.end, "Caption", `{${pos}${fs}${look.animation === "none" ? "" : "\\fad(80,60)"}}${join(parts)}`);
-    } else {
-      // One event per spoken word.
-      g.words.forEach((w, k) => {
-        const start = k === 0 ? g.start : w.start;
-        const end = k + 1 < g.words.length ? g.words[k + 1].start : g.end;
-        if (look.background === "band") {
-          // The marker: a rounded band behind the spoken word, from its capitals' top to just under its baseline.
-          const box = wordBox(k, k);
-          const s = wordScale(k);
-          const baseline = lineTop(box.l) + ascent * scale * lineScale(box.l);
-          const y = baseline - capHeight * scale * s;
-          shape(start, end, roundedRect(box.x0 - 0.12 * size * s, y - 0.16 * size * scale * s, box.x1 + 0.12 * size * s, baseline + 0.16 * size * scale * s, 0.14 * size * s), look.backgroundColor, 0);
-        }
-        // A word as a layer draws it: the words (all of it), its soft shadow, or its glow (only their own parts).
-        const wordParts = (layer: "words" | "shadow" | "glow") => {
-          const on = layer === "words" ? alphaOn : layer === "shadow" ? `\\1a${hexAlpha(0x40)}\\3a&HFF&\\4a&HFF&` : "\\1a&HFF&\\3a&H30&\\4a&HFF&";
-          return words.map((word, i) => {
-            const heavy = faceAt(i, k) !== face ? `\\fn${faceAt(i, k).family}` : "";
-            const back = heavy ? `\\fn${face.family}` : "";
-            const big = isKey(i) && keyScale !== 1 ? scaleTag(100 * keyScale) : "";
-            const unbig = big ? scaleTag(100) : "";
-            // Not said yet: in its place, unseen.
-            if (revealing && i > k) return `{${alphaOff}${heavy}${big}}${word}{${on}${back}${unbig}}`;
-            if (layer === "glow") {
-              const wide = i === k ? [`\\bord${(0.16 * size).toFixed(1)}`, `\\bord${(0.1 * size).toFixed(1)}`] : ["", ""];
-              return wide[0] || heavy || big ? `{${wide[0]}${heavy}${big}}${word}{${wide[1]}${back}${unbig}}` : word;
-            }
-            if (i === k) {
-              // Hollow letters never popped (only the newer animations move them).
-              const motion = hollow && look.animation === "pop" ? null : wordMotion(look, isKey(i));
-              let anim = "";
-              let reset = "";
-              if (look.animation === "typewriter") {
-                // Letter by letter, from when the word is said.
-                const letters = [...word].map((ch, n) => `{${alphaOff}\\t(${Math.round(n * TYPEWRITER_LETTER * 1000)},${Math.round(n * TYPEWRITER_LETTER * 1000) + 1},${on})}${ch}`).join("");
-                const tags = layer === "words" ? [colorFor(i), heavy + big] : ["", heavy + big];
-                return `{${tags[0]}${tags[1]}}${letters}{${on}${layer === "words" ? `\\1c${tagColor(look.color)}` : ""}${back}${unbig}}`;
-              }
-              if (look.animation === "reveal") {
-                anim = `${alphaOff}${scaleTag(90 * wordScale(i))}\\t(0,80,${on}${scaleTag(100 * wordScale(i))})`;
-                reset = `${on}${scaleTag(100)}`;
-              } else if (motion) {
-                const s = wordScale(i);
-                const [first, ...rest] = motion.scale;
-                anim = motion.fromY ? `\\fscx${Math.round(100 * s)}\\fscy${Math.round(motion.fromY * s)}${alphaOff}\\t(0,${motion.fade ?? 0},${on})\\t(0,${rest[rest.length - 1][0]},\\fscy${Math.round(100 * s)})` : scaleTag(first[1] * s) + rest.map(([t, v], n) => `\\t(${n === 0 ? first[0] : rest[n - 1][0]},${t},${scaleTag(v * s)})`).join("");
-                reset = `${motion.fromY ? on : ""}${scaleTag(100)}`;
-              } else if (big) {
-                anim = big;
-                reset = unbig;
-              }
-              if (layer !== "words") return `{${heavy}${anim}}${word}{${back}${reset}}`;
-              if (look.fill === "dim" && !anim) return `{\\1a&H00&${heavy}}${word}${back ? `{${back}}` : ""}`;
-              if (hollow && !anim) return `{\\1a&H00&\\1c${tagColor(look.accent)}}${word}{\\1a&HFF&}`;
-              // On the marker band the word is printed flat: no outline or shadow.
-              const [flat, unflat] = look.background === "band" ? ["\\bord0\\shad0", `\\bord${outline.toFixed(1)}\\shad${shadowDepth.toFixed(1)}`] : ["", ""];
-              return `{${colorFor(i)}${heavy}${anim}${flat}}${word}{${hollow ? "\\1a&HFF&" : `\\1c${tagColor(look.color)}`}${reset}${back}${unflat}}`;
-            }
-            if (layer !== "words") return heavy || big ? `{${heavy}${big}}${word}{${back}${unbig}}` : word;
-            if (look.fill === "dim") return `{\\1a&H48&${heavy}${big}}${word}${back || unbig ? `{${back}${unbig}}` : ""}`;
-            if (hollow) return big ? `{${big}}${word}{${unbig}}` : word;
-            if (isKey(i) && look.keyword !== look.color) return `{\\1c${tagColor(look.keyword)}${heavy}${big}}${word}{\\1c${tagColor(look.color)}${back}${unbig}}`;
-            return heavy || big ? `{${heavy}${big}}${word}{${back}${unbig}}` : word;
+      dialogue(g.start, g.end, "Caption", `{${placeAt(p.an, p.x, p.y, true)}${p.tags}${look.animation === "none" ? "" : "\\fad(80,60)"}}${joinLines(p, parts)}`);
+      return;
+    }
+
+    // The newer animations' steps as tags: the first now, the rest as \t transforms (a cut one at once), scaled for a
+    // bigger key word, on a marker band without changing size (the band doesn't grow), fading from and back to the
+    // layer's own visibility (from faint, with ghost), and flashing from white to the word's colour (the words only).
+    function keyedTags(steps: readonly WordKey[], alphas: readonly number[], blur: number, sz: number, color: string, white: boolean, px: number) {
+      const usesAlpha = steps.some((q) => (q.alpha ?? 1) < 1);
+      const usesBlur = steps.some((q) => q.blur);
+      const usesWhite = white && steps.some((q) => q.white);
+      const band = look.background === "band";
+      const tagsOf = (q: WordKey) => {
+        const v = wordKeyValues(q);
+        const seen = look.ghost ? GHOST_OPACITY + (1 - GHOST_OPACITY) * v.alpha : v.alpha;
+        let tags = band ? "" : `\\fscx${Math.round(v.sx * sz)}\\fscy${Math.round(v.sy * sz)}`;
+        if (usesBlur) tags += `\\blur${Math.max(blur, v.blur * px).toFixed(1)}`;
+        if (usesAlpha) tags += alphas.map((a, n) => `\\${[1, 3, 4][n]}a${hexAlpha(Math.round(a + (255 - a) * (1 - seen)))}`).join("");
+        if (usesWhite) tags += `\\1c${tagColor(mixHex(color, "#FFFFFF", v.white))}`;
+        return tags;
+      };
+      return tagsOf(steps[0]) + steps.slice(1).map((q, n) => (q.cut ? `\\t(${q.at},${q.at + 1},${tagsOf(q)})` : `\\t(${steps[n].at},${q.at},${tagsOf(q)})`)).join("");
+    }
+    function wordColor(i: number) {
+      return look.background !== "band" && isKey(i) && look.keyword !== look.color ? look.keyword : look.accent;
+    }
+    // The spoken word's colour: the accent (on a band, the band's own text colour), or a key word's, or filled
+    // (hollow), or full (dim).
+    function colorFor(i: number) {
+      if (look.fill === "dim") return "\\1a&H00&";
+      if (hollow) return `\\1a&H00&\\1c${tagColor(look.accent)}`;
+      const color = look.background !== "band" && isKey(i) && look.keyword !== look.color ? look.keyword : look.accent;
+      return `\\1c${tagColor(color)}`;
+    }
+
+    // Word i as a layer draws it while word k is said: the words (all of it), its soft shadow, or a glow (only their own
+    // parts), in event p.
+    function partOf(layer: Layer, i: number, k: number, p: Piece): string {
+      const word = words[i];
+      const on = alphaTags(restAlphas(layer, isKey(i)));
+      const faint = alphaTags(restAlphas(layer, isKey(i)).map(ghostAlpha));
+      const f = faceAt(i, k);
+      // A key word in a font of their own is switched to it, and off the look's letter spacing; and back after.
+      const unspaced = p.spacing && !ownFont(i);
+      const heavy = (f !== face ? switchFace(f, face) : "") + (unspaced ? "\\fsp0" : "");
+      const back = (f !== face ? switchFace(face, f) : "") + (unspaced ? p.spacing : "");
+      const s = p.scaleOf(i);
+      const big = s !== 1 ? scaleTag(100 * s) : "";
+      const unbig = big ? scaleTag(100) : "";
+      // On the marker band words are printed flat: no outline or shadow, and no soft halo's blur (with no outline to
+      // blur, libass would blur the letters themselves).
+      const [flat, unflat] =
+        look.background === "band" ? [`\\bord0\\shad0${soft ? "\\blur0" : ""}`, `\\bord${p.outline}\\shad${p.shadow}${soft ? `\\blur${layerBlur("words", p.unit)}` : ""}`] : ["", ""];
+      const uncolor = hollow ? "\\1a&HFF&" : `\\1c${tagColor(look.color)}`;
+      // Not said yet: in its place, unseen; with ghost, faint (a key word in its colour).
+      if (i > k && (revealing || look.ghost)) {
+        if (!look.ghost) return `{${alphaOff}${heavy}${big}}${word}{${on}${back}${unbig}}`;
+        const tint = layer === "words" && look.fill !== "dim" && !hollow && isKey(i) && look.keyword !== look.color ? [`\\1c${tagColor(look.keyword)}`, `\\1c${tagColor(look.color)}`] : ["", ""];
+        return `{${faint}${tint[0]}${heavy}${big}}${word}{${on}${tint[1]}${back}${unbig}}`;
+      }
+      if (layer === "glow") {
+        const wide = i === k ? [`\\bord${(0.16 * p.unit).toFixed(1)}`, `\\bord${(0.1 * p.unit).toFixed(1)}`] : ["", ""];
+        return wide[0] || heavy || big ? `{${wide[0]}${heavy}${big}}${word}{${wide[1]}${back}${unbig}}` : word;
+      }
+      if (i === k) {
+        // Hollow letters never popped (only the newer animations move them).
+        const motion = hollow && look.animation === "pop" ? null : wordMotion(look, isKey(i));
+        // A word that comes in comes from nothing, or with ghost from faint.
+        const hide = look.ghost ? faint : alphaOff;
+        let anim = "";
+        let reset = "";
+        if (look.animation === "wave" && look.background !== "band") {
+          // Each letter pops in turn and settles (not on a marker band, which doesn't grow with its word).
+          const letters = [...word].map((ch, n) => {
+            const d = n * WAVE.stagger;
+            return `{\\t(${d},${d + WAVE.up},${scaleTag(WAVE.peak * s)})\\t(${d + WAVE.up},${d + WAVE.up + WAVE.down},${scaleTag(100 * s)})}${ch}`;
           });
-        };
-        // The spoken word's colour: the accent (on a band, the band's own text colour), or a key word's, or filled
-        // (hollow), or full (dim).
-        function colorFor(i: number) {
-          if (look.fill === "dim") return "\\1a&H00&";
-          if (hollow) return `\\1a&H00&\\1c${tagColor(look.accent)}`;
-          const color = look.background !== "band" && isKey(i) && look.keyword !== look.color ? look.keyword : look.accent;
-          return `\\1c${tagColor(color)}`;
+          const tags = layer === "words" ? colorFor(i) : "";
+          // The last letter's size would carry on to the rest of the line: set it back after the word.
+          return `{${tags}${heavy}${big}}${letters.join("")}{${layer !== "words" ? "" : uncolor}${back}${scaleTag(100)}}`;
         }
-        const fill = hollow ? "\\1a&HFF&" : "";
+        const steps = WORD_KEYS[look.animation];
+        if (steps) {
+          // Each layer's blur at rest: the key glow's at its word's size, the rest at the look's.
+          const rest = layerBlur(layer, layer === "keyglow" ? p.px * s : p.unit);
+          anim = keyedTags(steps, keyAlphas(layer, isKey(i)), rest, s, wordColor(i), layer === "words", p.px);
+          reset = `${scaleTag(100)}${steps.some((q) => (q.alpha ?? 1) < 1) ? on : ""}${steps.some((q) => q.blur) ? `\\blur${rest}` : ""}`;
+        } else if (look.animation === "typewriter") {
+          // Letter by letter, from when the word is said.
+          const letters = [...word].map((ch, n) => `{${hide}\\t(${Math.round(n * TYPEWRITER_LETTER * 1000)},${Math.round(n * TYPEWRITER_LETTER * 1000) + 1},${on})}${ch}`).join("");
+          const tags = layer === "words" ? [colorFor(i), heavy + big] : ["", heavy + big];
+          return `{${tags[0]}${tags[1]}}${letters}{${on}${layer === "words" ? `\\1c${tagColor(look.color)}` : ""}${back}${unbig}}`;
+        }
+        if (look.animation === "reveal") {
+          anim = `${hide}${scaleTag(90 * s)}\\t(0,80,${on}${scaleTag(100 * s)})`;
+          reset = `${on}${scaleTag(100)}`;
+        } else if (motion) {
+          const [first, ...rest] = motion.scale;
+          anim = motion.fromY ? `\\fscx${Math.round(100 * s)}\\fscy${Math.round(motion.fromY * s)}${hide}\\t(0,${motion.fade ?? 0},${on})\\t(0,${rest[rest.length - 1][0]},\\fscy${Math.round(100 * s)})` : scaleTag(first[1] * s) + rest.map(([t, v], n) => `\\t(${n === 0 ? first[0] : rest[n - 1][0]},${t},${scaleTag(v * s)})`).join("");
+          reset = `${motion.fromY ? on : ""}${scaleTag(100)}`;
+        } else if (big && !steps) {
+          // A bigger key word that doesn't move (the stepped animations scale it themselves).
+          anim = big;
+          reset = unbig;
+        }
+        if (layer !== "words") return `{${heavy}${anim}}${word}{${back}${reset}}`;
+        if (look.fill === "dim" && !anim) return `{\\1a&H00&${heavy}}${word}${back ? `{${back}}` : ""}`;
+        if (hollow && !anim) return `{\\1a&H00&\\1c${tagColor(look.accent)}${heavy}}${word}{\\1a&HFF&${back}}`;
+        return `{${colorFor(i)}${heavy}${anim}${flat}}${word}{${uncolor}${reset}${back}${unflat}}`;
+      }
+      // Said already, with ghost: as the spoken word looks (its colour, its band), without its motion.
+      if (look.ghost && i < k) {
+        if (layer !== "words") return heavy || big ? `{${heavy}${big}}${word}{${back}${unbig}}` : word;
+        return `{${colorFor(i)}${heavy}${big}${flat}}${word}{${uncolor}${back}${unbig}${unflat}}`;
+      }
+      if (layer !== "words") return heavy || big ? `{${heavy}${big}}${word}{${back}${unbig}}` : word;
+      if (look.fill === "dim") return `{\\1a&H48&${heavy}${big}}${word}${back || unbig ? `{${back}${unbig}}` : ""}`;
+      if (hollow) return heavy || big ? `{${heavy}${big}}${word}{${back}${unbig}}` : word;
+      if (isKey(i) && look.keyword !== look.color) return `{\\1c${tagColor(look.keyword)}${heavy}${big}}${word}{\\1c${tagColor(look.color)}${back}${unbig}}`;
+      return heavy || big ? `{${heavy}${big}}${word}{${back}${unbig}}` : word;
+    }
+
+    // An event's text for a layer while word k is said. The key glow sets each word's own visibility first (key words
+    // glow, the rest don't), and a bigger key word's glow is as wide as its size makes it.
+    const keyGlowOf = (i: number, p: Piece) => {
+      const s = p.scaleOf(i);
+      return alphaTags(restAlphas("keyglow", isKey(i))) + (isKey(i) && s !== 1 ? `\\bord${(KEY_GLOW.width * p.px * s).toFixed(1)}\\blur${Math.round(KEY_GLOW.blur * p.px * s)}` : "");
+    };
+    const textOf = (layer: Layer, k: number, p: Piece) => {
+      const parts: string[] = [];
+      for (let i = p.from; i < p.to; i++) parts.push(layer === "keyglow" ? `{${keyGlowOf(i, p)}}${partOf(layer, i, k, p)}` : partOf(layer, i, k, p));
+      return joinLines(p, parts);
+    };
+
+    // One event per spoken word (per line of a lockup), each layer its own.
+    g.words.forEach((w, k) => {
+      const start = k === 0 ? g.start : w.start;
+      const end = k + 1 < g.words.length ? g.words[k + 1].start : g.end;
+      // The marker band behind the spoken word; with ghost, behind every word said so far too (those already there,
+      // not fading in again).
+      if (look.background === "band") for (let j = look.ghost ? 0 : k; j <= k; j++) shape(start, end, bandAt(j, k), look.backgroundColor, 0, 0, j === k);
+      for (const p of pieces) {
+        const at = (drop = 0) => placeAt(p.an, p.x, p.y + drop, k === 0);
+        const fadIn = k === 0 ? fad : "";
         if (look.glow) {
           // The glow underneath: a wide, blurred outline in the accent colour, wider on the spoken word.
-          dialogue(start, end, "Caption", `{${pos}${fs}${k === 0 ? fad : ""}\\1a&HFF&\\3c${tagColor(look.accent)}\\3a&H30&\\bord${(0.1 * size).toFixed(1)}\\blur${Math.round(0.12 * size)}\\shad0}${join(wordParts("glow"))}`, 0);
+          dialogue(start, end, "Caption", `{${at()}${p.tags}${fadIn}\\1a&HFF&\\3c${tagColor(look.accent)}\\3a&H30&\\bord${(0.1 * p.unit).toFixed(1)}\\blur${Math.round(0.12 * p.unit)}\\shad0}${textOf("glow", k, p)}`, 0);
         }
         if (look.shadowKind === "soft") {
           // A soft shadow underneath: the letters again in see-through black, a little lower, blurred (libass draws no
           // shadow for letters that are themselves invisible, so this is the shadow).
-          const drop = Math.round(SHADOW.offset * size);
-          const under = anchor === "top" ? `\\an8\\pos(${x},${top + drop})` : `\\an2\\pos(${x},${bottom + drop})`;
-          dialogue(start, end, "Caption", `{${under}${fs}${k === 0 ? fad : ""}\\1c&H000000&\\1a${hexAlpha(0x40)}\\3a&HFF&\\4a&HFF&\\bord0\\shad0\\blur${Math.round(SHADOW.blur * size)}}${join(wordParts("shadow"))}`, 0);
+          const drop = Math.round(SHADOW.offset * p.unit);
+          dialogue(start, end, "Caption", `{${at(drop)}${p.tags}${fadIn}\\1c&H000000&\\1a${hexAlpha(0x40)}\\3a&HFF&\\4a&HFF&\\bord0\\shad0\\blur${Math.round(SHADOW.blur * p.unit)}}${textOf("shadow", k, p)}`, 0);
         }
-        dialogue(start, end, "Caption", `{${pos}${fs}${soft}${fill}${k === 0 ? fad : ""}}${join(wordParts("words"))}`);
-      });
-    }
+        if (look.keyGlow && keyList.some((i) => i >= p.from && i < p.to)) {
+          // Key words' own glow, in their colour, over the shadows: the line glow's wide blurred outline at the key
+          // word's own size, round key words only.
+          dialogue(start, end, "Caption", `{${at()}${p.tags}${fadIn}\\1a&HFF&\\3c${tagColor(look.keyword)}\\3a&HFF&\\4a&HFF&\\bord${(KEY_GLOW.width * p.px).toFixed(1)}\\blur${Math.round(KEY_GLOW.blur * p.px)}\\shad0}${textOf("keyglow", k, p)}`, 0);
+        }
+        dialogue(start, end, "Caption", `{${at()}${p.tags}${soft ? `\\blur${layerBlur("words", p.unit)}` : ""}${hollowFill}${fadIn}}${textOf("words", k, p)}`);
+      }
+    });
   });
 
   // Each emoji pops in by its line as its word is said: above the caption, or below it (by default below when captions
   // are at the top). Without a line on screen, it goes where a one-line caption would be.
   const emojis: EmojiShot[] = shows.map((s) => {
-    const block = s.line >= 0 ? blocks[s.line] : lineHeight;
+    const block = s.line >= 0 ? (blocks[s.line] ?? lineHeight) : lineHeight; // captions off: no lines drawn
     const below = emojiStyle.place === "below" || (emojiStyle.place === "auto" && look.position === "top");
     const y = below ? (anchor === "top" ? top + block + 0.015 * H : bottom + 0.015 * H) : anchor === "top" ? top - 0.012 * H - emojiSize : bottom - block - 0.01 * H - emojiSize;
     return { emoji: s.emoji, start: s.start, end: s.end, x: Math.round(x - emojiSize / 2), y: Math.round(Math.min(H - emojiSize, Math.max(0, y))), size: emojiSize };
@@ -1090,8 +1438,12 @@ function buildAss(groups: CaptionLine[], keywords: Set<number>, shows: ReturnTyp
 
 /* ---------- "Behind you" ---------- */
 
-/** A font style for the big words: the face, its casing and colour, letter spacing (em), and whether it's an outline. */
-type BigLook = { face: FaceName; casing: "upper" | "lower" | "title"; color: string; tracking: number; hollow?: boolean };
+/**
+ * A font style for the big words: the face, its casing and colour (the customer's, when they set them, take over:
+ * look.bigCasing and look.bigColors), letter spacing (em), and whether it's an outline (the colour is the outline's).
+ * The web app's previews copy these (BIG_SAMPLES in web/components/reels/font-picker.tsx).
+ */
+type BigLook = { face: FaceName; casing: BigCasing; color: string; tracking: number; hollow?: boolean };
 const BIG_LOOKS: Record<ReelFont, BigLook> = {
   classic: { face: "Inter Black", casing: "upper", color: "#FFFFFF", tracking: -0.02 },
   impact: { face: "Anton", casing: "upper", color: "#FFE135", tracking: 0.01 },
@@ -1101,15 +1453,25 @@ const BIG_LOOKS: Record<ReelFont, BigLook> = {
   marker: { face: "Permanent Marker", casing: "upper", color: "#FFFFFF", tracking: 0 },
   outline: { face: "Inter Black", casing: "upper", color: "#FFFFFF", tracking: 0, hollow: true },
   pop: { face: "Archivo Black", casing: "upper", color: "#C6FF3D", tracking: -0.02 },
+  // From the caption fonts: rounded comic capitals, a tall magazine serif italic, tall condensed capitals, and two
+  // heavy sans in lower case (rounded and geometric), each in a colour of its own.
+  chunky: { face: "Luckiest Guy", casing: "upper", color: "#FF8A1E", tracking: 0 },
+  slim: { face: "Instrument Serif", casing: "upper", color: "#FFD27A", tracking: -0.01 },
+  poster: { face: "Bebas Neue", casing: "upper", color: "#FF5C8A", tracking: 0.01 },
+  rounded: { face: "Rubik Black", casing: "lower", color: "#B39DFF", tracking: -0.02 },
+  geometric: { face: "Poppins ExtraBold", casing: "lower", color: "#38E1C6", tracking: -0.02 },
+  // And from the fonts added for templates: a high-contrast didone, a bubbly rounded sans, a calligraphy script, 8-bit
+  // pixels, a soft heavy display and an extra-wide grotesque.
+  didone: { face: "Playfair Display", casing: "upper", color: "#E2C285", tracking: -0.01 },
+  bubbly: { face: "Fredoka", casing: "lower", color: "#FF8FC7", tracking: -0.01 },
+  calligraphy: { face: "Great Vibes", casing: "title", color: "#FFFFFF", tracking: 0 },
+  arcade: { face: "Press Start 2P", casing: "upper", color: "#FA6C98", tracking: 0 },
+  block: { face: "Lilita One", casing: "upper", color: "#FFD800", tracking: 0 },
+  wide: { face: "Archivo Expanded ExtraBold", casing: "upper", color: "#FFFFFF", tracking: -0.01 },
 };
 
-/** A big word as its font style writes it: trailing commas and full stops dropped, then cased. */
-function bigText(word: string, look: BigLook): string {
-  const text = assText(word).replace(/[.,;:]+$/, "");
-  if (look.casing === "upper") return text.toLocaleUpperCase("en");
-  if (look.casing === "lower") return text.toLocaleLowerCase("en");
-  return text.charAt(0).toLocaleUpperCase("en") + text.slice(1);
-}
+/** A big word as its font style writes it (bigWordText): trailing commas and full stops dropped, then cased. */
+const bigText = (word: string, look: BigLook) => bigWordText(assText(word), look.casing);
 
 /** A character's measurements in a face (fonts.ts): its own, else its letter without the accent, else an average letter's. */
 const glyphOf = (face: Face, ch: string) => face.glyphs[ch] ?? face.glyphs[ch.normalize("NFD")[0]] ?? face.glyphs[/\p{Lu}/u.test(ch) ? "O" : "o"];
@@ -1315,6 +1677,9 @@ type Placement = { text: string; start: number; end: number; front: boolean; hid
  */
 function buildBehind(groups: CaptionLine[], keywords: Set<number>, hook: string, look: Look, bigs: BigLook[], frame: Frame, spec: ReelSpec, duration: number, seg: Seg | null): { behind: string; front: string; placements: Placement[] } {
   const { width: W, height: H } = frame;
+  // The customer's casing for the big words, when they chose one, over each font style's own.
+  const casing = look.bigCasing;
+  if (casing) bigs = bigs.map((b) => ({ ...b, casing }));
   const first: Face = FACES[bigs[0].face];
   const base = Math.sqrt(W * H);
   const layout = layoutFor(W, H);
@@ -1338,10 +1703,11 @@ function buildBehind(groups: CaptionLine[], keywords: Set<number>, hook: string,
   const placements: Placement[] = [];
   const cuts = (seg?.cuts ?? []).map((f) => f / FPS);
 
-  // Big text fades up into place. The more of it the speaker hides, the further back it sits: blurred (up to 6 px at
-  // 1080p), darker (up to 40%) and smaller (up to 6%). Its soft shadow gets darker and wider on a bright background,
-  // so the words still read on a white wall. An outline style draws only the stroke, and its shadow is a blurred stroke.
-  const draw = (big: BigLook, lines: string[], spot: Spot, start: number, end: number) => {
+  // Big text fades up into place, in `hex` (its turn's colour). The more of it the speaker hides, the further back it
+  // sits: blurred (up to 6 px at 1080p), darker (up to 40%) and smaller (up to 6%). Its soft shadow gets darker and
+  // wider on a bright background, so the words still read on a white wall. An outline style draws only the stroke (in
+  // the colour), and its shadow is a blurred stroke.
+  const draw = (big: BigLook, lines: string[], spot: Spot, start: number, end: number, hex: string) => {
     const face: Face = FACES[big.face];
     const depth = spot.front ? 0 : Math.min(1, spot.hidden / WORD_AIM.max);
     const block = measureBlock(big, lines, spot.size);
@@ -1349,7 +1715,7 @@ function buildBehind(groups: CaptionLine[], keywords: Set<number>, hook: string,
     const blur = (6 * depth * base) / 1440;
     const [rise, drop] = [Math.round(0.012 * H), Math.round(0.005 * H)];
     const [shade, spread] = spot.light > 0.72 ? ["&H20&", 0.02] : spot.light > 0.55 ? ["&H48&", 0.017] : ["&H70&", 0.014];
-    const color = tagColor(darker(big.color, 0.4 * depth));
+    const color = tagColor(darker(hex, 0.4 * depth));
     const stroke = big.hollow ? strokeOf(face, spot.size).toFixed(1) : "0";
     const spacing = ((big.tracking * spot.size) / (face.asc + face.desc)).toFixed(1);
     const common = `\\an5\\fn${face.family}\\i${face.italic ? 1 : 0}\\fs${spot.size}\\fsp${spacing}\\fscx${scale}\\fscy${scale}\\fad(100,120)\\bord${stroke}`;
@@ -1364,46 +1730,36 @@ function buildBehind(groups: CaptionLine[], keywords: Set<number>, hook: string,
     placements.push({ text: lines.join(" "), start: round(start), end: round(end), front: spot.front, hidden: round(spot.hidden), peak: round(spot.peak), face: round(spot.face), light: round(spot.light), y: round(spot.y / H), width: round(spot.width / W) });
   };
 
-  // The hook, for the first 2.5 s, in the first font style.
+  // The hook, for the first 2.5 s, in the first font style and the first colour (it's turn 0).
   const hookEnd = hook ? Math.min(HOOK_END, duration - 0.1) : 0;
   if (hook) {
     const words = hook.split(" ").map((w) => bigText(w, bigs[0])).filter(Boolean);
     const lines = balance(words, words.length <= 2 ? 1 : words.length <= 5 ? 2 : 3, bigs[0]);
-    draw(bigs[0], lines, place(bigs[0], lines, HOOK_START, hookEnd, seg, frame, band, HOOK_AIM, (tall ? 0.075 : 0.1) * H * lines.length, null), HOOK_START, hookEnd);
+    draw(bigs[0], lines, place(bigs[0], lines, HOOK_START, hookEnd, seg, frame, band, HOOK_AIM, (tall ? 0.075 : 0.1) * H * lines.length, null), HOOK_START, hookEnd, bigColorOf(look.bigColors, 0, bigs[0].color));
   }
 
-  // Each line's big word: from when it's said to the end of the line (0.8 s at least), never into the next one or
-  // across a cut. One said just before a cut waits for the new shot.
-  const shots: { gi: number; k: number; start: number; end: number }[] = [];
-  groups.forEach((g, gi) => {
-    // The line's first highlighted word, else its strongest.
-    const marked = g.words.findIndex((w) => keywords.has(w.i));
-    const k = marked >= 0 ? marked : strongestWord(g.words);
-    if (k === null || g.words[k].start < hookEnd) return;
-    let [start, end] = [Math.max(0, g.words[k].start - 0.05), Math.min(duration, Math.max(g.end, g.words[k].start + 0.8))];
-    const cut = cuts.find((c) => c > start && c < end);
-    if (cut !== undefined && cut - start < 0.4) start = cut;
-    else if (cut !== undefined) end = cut - 1 / FPS;
-    shots.push({ gi, k, start, end });
-  });
-  shots.forEach((s, i) => (s.end = Math.min(s.end, (shots[i + 1]?.start ?? Infinity) - 0.04)));
-  const kept = shots.filter((s) => s.end - s.start >= 0.4);
-  // With several font styles the words take turns, in the order they were picked (after the hook's).
+  // Each line's big word (bigWords: the line's first highlighted word, else its strongest), from when it's said to the
+  // end of the line, never into the next one or across a cut. With several font styles, or colours, the words take
+  // turns, in the order they were picked (after the hook's).
+  const kept = bigWords(groups, keywords, hook ? hookEnd : null, duration, cuts, 1 / FPS);
   let previous: { y: number; end: number } | null = null;
-  for (const [n, s] of kept.entries()) {
-    const big = bigs[(n + (hook ? 1 : 0)) % bigs.length];
-    const text = bigText(groups[s.gi].words[s.k].text, big);
+  for (const s of kept) {
+    const big = bigs[s.turn % bigs.length];
+    const text = bigText(groups[s.line].words[s.word].text, big);
     if (!text) continue;
     // Near the previous word when it's the same shot and just before: the words shouldn't jump about.
     const near = previous && s.start - previous.end < 1 && !cuts.some((c) => c > previous!.end && c <= s.start) ? previous.y : null;
     const spot = place(big, [text], s.start, s.end, seg, frame, band, WORD_AIM, (tall ? 0.15 : 0.2) * H, near);
-    draw(big, [text], spot, s.start, s.end);
+    draw(big, [text], spot, s.start, s.end, bigColorOf(look.bigColors, s.turn, big.color));
     previous = { y: spot.y, end: s.end };
   }
 
-  // In front: the rest of each line, building word by word (words still to come are drawn invisible, so nothing moves).
+  // In front: the rest of each line, building word by word (words still to come are drawn invisible, so nothing moves),
+  // the spoken word in the highlight colour when the look's differs from its words' (Behind you's own is white on white;
+  // a look with a box behind the spoken word has the box's text colour as its accent, and this style draws no boxes).
   // It sits at the top of the safe box, or lower in it when the speaker's face is there; it stays put while it can.
-  const heroes = new Map(kept.map((s) => [s.gi, s.k]));
+  const heroes = new Map(kept.map((s) => [s.line, s.word]));
+  const spoken = look.background !== "band" && look.accent.toUpperCase() !== look.color.toUpperCase() ? `{\\1c${tagColor(look.accent)}}` : "";
   const max = W * captionWidth(W, H);
   const soft = `\\blur${Math.max(3, Math.round(size * 0.14))}`;
   let lastTop: number | null = null;
@@ -1431,7 +1787,8 @@ function buildBehind(groups: CaptionLine[], keywords: Set<number>, hook: string,
     top = lastTop = Math.round(top);
     rest.forEach((wi, n) => {
       const end = n + 1 < rest.length ? g.words[rest[n + 1]].start : g.end;
-      const text = words.map((w, i) => `${i === 0 ? "" : lines.length > 1 && i === lines[0].length ? "\\N" : " "}${i === n + 1 ? "{\\alpha&HFF&}" : ""}${w}`).join("");
+      // Words after the spoken one are unseen, so its colour needn't be set back.
+      const text = words.map((w, i) => `${i === 0 ? "" : lines.length > 1 && i === lines[0].length ? "\\N" : " "}${i === n ? spoken : i === n + 1 ? "{\\alpha&HFF&}" : ""}${w}`).join("");
       const event = dialogueLine(g.words[wi].start, end, "Sub", `{\\an8\\pos(${x},${top})${fs}${soft}${n === 0 ? "\\fad(60,0)" : ""}}${text}`);
       if (event) frontEvents.push(event);
     });
@@ -1511,7 +1868,7 @@ function mixAudio(input: string, cues: SoundCue[], speechLufs: number, duration:
   const gain = Math.max(-12, Math.min(24, -16 - speechLufs)).toFixed(1);
   const format = "aresample=48000:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo";
   const clean = sound.clean ? "highpass=f=75,afftdn=nr=12:nf=-45:tn=1," : "";
-  const music = sound.music;
+  const music = libraryBed(sound.music);
   const bed = cues.length + 1; // the music's input number, after the voice and the effects
   const graph = [
     `[0:a:0]${format},${clean}volume=${gain}dB,apad=whole_dur=${duration},atrim=0:${duration}${music ? ",asplit=2[speech][key]" : "[speech]"}`,
@@ -1574,21 +1931,105 @@ function normalizeChain(frame: Frame, source: Probe): string[] {
  * The upload with its trims cut out, for the render: the picture made ready (normalizeChain), then only the frames in
  * the kept stretches; the sound at 48 kHz in 64-sample blocks (25 a frame), cut at the same frame boundaries, so picture
  * and sound stay in sync however many cuts there are. Cuts in the middle of a sound (not a pause) get a few
- * milliseconds' fade, so they don't click.
+ * milliseconds' fade, so they don't click. The transitions' patches (transitionPatches) take the place of the picture's
+ * frames around their joints; the sound still cuts hard at the joint.
  */
-function cutUpload(input: string, source: Probe, frame: Frame, trims: Trim[], duration: number, out: string) {
+function cutUpload(input: string, source: Probe, frame: Frame, trims: Trim[], duration: number, out: string, joints: TransitionJoint[] = []) {
   const { segments } = cutClock(duration, trims);
   const half = 1 / (2 * FPS);
   const keep = (h: number) => segments.map(([a, b]) => `gte(t,${(a - h).toFixed(5)})*lt(t,${(b - h).toFixed(5)})`).join("+");
   const edges = trims.filter((t) => t.reason !== "pause").flatMap((t) => [t.start, t.end]).filter((x) => x > 0 && x < duration);
   const fade = edges.length ? `,volume='${edges.map((x) => `min(1,abs(t-${x.toFixed(4)})/0.006)`).join("*")}':eval=frame` : "";
   const graph = [
-    `[0:v:0]${[...normalizeChain(frame, source), `select='${keep(half)}'`, `setpts=N/(${FPS}*TB)`].join(",")}[v]`,
+    `[0:v:0]${[...normalizeChain(frame, source), `select='${keep(half)}'`, `setpts=N/(${FPS}*TB)`].join(",")}[${joints.length ? "cut" : "v"}]`,
     `[0:a:0]aresample=48000:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,asetnsamples=n=64:p=0${fade},aselect='${keep(1 / 1500)}',asetpts=N/SR/TB[a]`,
   ];
+  const patches = joints.length ? transitionPatches(input, source, frame, joints) : [];
+  const more: string[] = [];
+  if (patches.length) {
+    // The patches come one after another (frame N of the files, read as one); each goes back to its own frames on the
+    // cut video's clock (1/30 s, so a timestamp counts frames). The cut video drops those frames and the two are merged
+    // in time order: exact to the frame, where an overlay's enable runs a frame late (and holds a patch's last frame).
+    const list = join(WORK, "patches.txt");
+    writeFileSync(list, patches.map((f) => `file '${basename(f)}'`).join("\n"));
+    more.push("-f", "concat", "-i", list);
+    // Patch k starts at frame first[k] of the file and at frame at[k] of the cut video: its frames move by at[k] -
+    // first[k], as steps (each patch ends before the next starts, so no step goes back).
+    let first = 0;
+    let moved = 0;
+    const steps: string[] = [];
+    const windows: string[] = [];
+    for (const j of joints) {
+      const [at, n] = [Math.round(j.start * FPS), Math.round(j.length * FPS)];
+      steps.push(first ? `gte(N,${first})*${at - first - moved}` : `${at}`);
+      moved = at - first;
+      windows.push(`between(n,${at},${at + n - 1})`);
+      first += n;
+    }
+    // interleave wants the same pixel shape on both (an upload's unset one reads as square).
+    graph.push(
+      `[cut]select='not(${windows.join("+")})',setsar=r=sar[main]`,
+      `[1:v:0]settb=1/${FPS},setpts='N+${steps.join("+")}',setsar=r=sar[patch]`,
+      `[main][patch]interleave,settb=1/${FPS}[v]`,
+    );
+  }
   const script = join(WORK, "cut.filter");
   writeFileSync(script, graph.join(";\n"));
-  ffmpeg(["-i", input, "-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", out], limitFor(duration, 20, 2));
+  ffmpeg(["-i", input, ...more, "-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", out], limitFor(duration, 20, 2));
+  for (const f of patches) rmSync(f, { force: true });
+}
+
+/** Frames read before each side of a transition and dropped, so its first frame is picked as the main picture picks it (at any frame rate). */
+const SIDE_LEAD = 3;
+/** Transitions per ffmpeg run that builds their patches: each read is its own input with its own decoder, and their memory adds up (about 50-150 MB each at 1080p). */
+const PATCH_BATCH = 8;
+/** Sides at most this far apart (seconds) are read in one go: decoding the stretch between costs less than seeking again (from a keyframe, often a second or more back). */
+const SHARED_READ = 1;
+
+/**
+ * The transitions as "patches" for the cut video, in files of a few each, in order: each its two sides read straight
+ * from the upload (seeked to just before them), made ready as the main picture is (normalizeChain), so they match it
+ * frame for frame, cut to exactly the transition's frames (a side shorter than that, at a cut inside the video or a
+ * short jump cut, holds its edge frame: the outgoing side its last, the incoming side its first), and mixed by xfade.
+ */
+function transitionPatches(input: string, source: Probe, frame: Frame, joints: TransitionJoint[]): string[] {
+  const files: string[] = [];
+  for (let b = 0; b < joints.length; b += PATCH_BATCH) {
+    const batch = joints.slice(b, b + PATCH_BATCH);
+    const inputs: string[] = [];
+    const graph: string[] = [];
+    batch.forEach((j, i) => {
+      const n = Math.round(j.length * FPS);
+      const [out, inc] = [j.out, j.in].map((r) => r.map((t) => Math.round(t * FPS)));
+      // An input for the upload's frames [from, to), from a few frames before (dropped), made ready: its label and where it starts.
+      const read = (from: number, to: number) => {
+        const seek = Math.max(0, from - SIDE_LEAD);
+        inputs.push("-ss", (seek / FPS).toFixed(6), "-t", ((to - seek) / FPS + 0.1).toFixed(6), "-i", input);
+        return { label: `[${inputs.length / 6 - 1}:v:0]${normalizeChain(frame, source).join(",")}`, seek };
+      };
+      // A side, from a read: its frames, held at its end ("stop", the outgoing side) or its start ("start", the
+      // incoming) for the frames it doesn't have.
+      const side = ([from, to]: number[], seek: number, end: "stop" | "start") =>
+        [`trim=start_frame=${from - seek}:end_frame=${to - seek}`, "setpts=PTS-STARTPTS", ...(to - from < n ? [`tpad=${end}_mode=clone:${end}=${n - (to - from)}`] : [])].join(",");
+      if (inc[0] - out[1] <= SHARED_READ * FPS) {
+        // Close together (a cut inside the video, or a short jump cut): one read for both, cheaper than a second seek.
+        const r = read(out[0], inc[1]);
+        graph.push(`${r.label},split[a${i}][b${i}]`, `[a${i}]${side(out, r.seek, "stop")}[o${i}]`, `[b${i}]${side(inc, r.seek, "start")}[i${i}]`);
+      } else {
+        const [ro, ri] = [read(out[0], out[1]), read(inc[0], inc[1])];
+        graph.push(`${ro.label},${side(out, ro.seek, "stop")}[o${i}]`, `${ri.label},${side(inc, ri.seek, "start")}[i${i}]`);
+      }
+      // Exactly n frames, whatever the upload had there: cutUpload finds each patch by its frame numbers.
+      graph.push(`[o${i}][i${i}]xfade=transition=${j.xfade}:duration=${(n / FPS).toFixed(6)}:offset=0,tpad=stop_mode=clone:stop=${n},trim=end_frame=${n}[p${i}]`);
+    });
+    graph.push(`${batch.map((_, i) => `[p${i}]`).join("")}concat=n=${batch.length}:v=1:a=0[p]`);
+    const script = join(WORK, `patches-${files.length}.filter`);
+    writeFileSync(script, graph.join(";\n"));
+    const out = join(WORK, `patches-${files.length}.mkv`);
+    ffmpeg([...inputs, "-filter_complex_script", script, "-map", "[p]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p", out]);
+    files.push(out);
+  }
+  return files;
 }
 
 /** The picture's filters: made ready (normalizeChain), fitted to the frame, and the punch-ins and the effects' moves (zoom and shake), all in one zoompan. */
@@ -1600,10 +2041,26 @@ function pictureChain(frame: Frame, source: Probe, zooms: ZoomWindow[], effects:
   const t = `(in/${FPS})`;
   const zoom = [punchExpr(zooms, t), channelExpr(effects, "zoom", t)].filter((e) => e !== "0");
   const [dx, dy] = [channelExpr(effects, "dx", t), channelExpr(effects, "dy", t)];
-  if (zoom.length || dx !== "0" || dy !== "0") {
+  // A twist turns the view about the middle. Turned by θ, a view needs c = cos θ + r sin θ more zoom (r: the frame's
+  // long side over its short) for its corners to stay on the picture, so zoompan takes the zoom less c (the effect's own
+  // zoom covers it) and perspective adds c back while it turns, from picture zoompan kept around the view.
+  const rot = channelExpr(effects, "rot", t);
+  const theta = `((${rot})*PI/180)`;
+  const cover = rot === "0" ? "" : `/(cos(abs(${theta}))+${(Math.max(W, H) / Math.min(W, H)).toFixed(4)}*sin(abs(${theta})))`;
+  if (zoom.length || dx !== "0" || dy !== "0" || cover) {
     const aim = zoomAim(W, H);
-    chain.push(`zoompan=z='1+${zoom.join("+") || "0"}':x='clip((iw-iw/zoom)/2-(${dx})*iw/zoom,0,iw-iw/zoom)':y='clip(ih*${aim}-ih/zoom/2-(${dy})*ih/zoom,0,ih-ih/zoom)':d=1:s=${W}x${H}:fps=${FPS}`);
+    chain.push(`zoompan=z='max(1,(1+${zoom.join("+") || "0"})${cover})':x='clip((iw-iw/zoom)/2-(${dx})*iw/zoom,0,iw-iw/zoom)':y='clip(ih*${aim}-ih/zoom/2-(${dy})*ih/zoom,0,ih-ih/zoom)':d=1:s=${W}x${H}:fps=${FPS}`);
   } else chain.push(`scale=${W}:${H}:flags=bicubic`);
+  if (cover) {
+    // The source corners of the turned view (W/2c by H/2c each way from the middle), sent to the frame's corners.
+    const c = `(cos(abs(${theta}))+${(Math.max(W, H) / Math.min(W, H)).toFixed(4)}*sin(abs(${theta})))`;
+    const corner = (sx: number, sy: number) => {
+      const [ox, oy] = [`(${sx}*W/(2*${c}))`, `(${sy}*H/(2*${c}))`];
+      return [`W/2+${ox}*cos(${theta})+${oy}*sin(${theta})`, `H/2-${ox}*sin(${theta})+${oy}*cos(${theta})`];
+    };
+    const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = [corner(-1, -1), corner(1, -1), corner(-1, 1), corner(1, 1)];
+    chain.push(`perspective=x0='${x0}':y0='${y0}':x1='${x1}':y1='${y1}':x2='${x2}':y2='${y2}':x3='${x3}':y3='${y3}':eval=frame:enable='${enableExpr(channelWindows(effects, "rot"))}'`);
+  }
   chain.push("setsar=1,format=yuv420p");
   return chain.join(",");
 }
@@ -1627,11 +2084,18 @@ function lookChain(frame: Frame, picture: ReelPicture, effects: PlacedEffect[]):
     chain.push(`rgbashift=rh=${-shift}:bh=${shift}`, `noise=c0s=${Math.round(VHS.noise * 40 * picture.strength)}:c0f=t+u`, `drawgrid=w=iw:h=${Math.max(3, Math.round(VHS.lines * W))}:t=1:c=black@${(VHS.lineAlpha * picture.strength).toFixed(2)}`);
   }
   for (const { level, windows } of channelSteps(effects, "blur")) chain.push(`gblur=sigma=${(level * W).toFixed(2)}:enable='${enableExpr(windows)}'`);
+  // Motion blur: the same blur, sideways only.
+  // (A vertical sigma of exactly 0 blanks the frame in this ffmpeg; a hundredth of a pixel is none.)
+  for (const { level, windows } of channelSteps(effects, "hblur")) chain.push(`gblur=sigma=${(level * W).toFixed(2)}:sigmaV=0.01:enable='${enableExpr(windows)}'`);
   for (const { level, windows } of channelSteps(effects, "rgb")) {
     const shift = Math.max(1, Math.round(level * W));
     chain.push(`rgbashift=rh=${-shift}:bh=${shift}:enable='${enableExpr(windows)}'`);
   }
   for (const { level, windows } of channelSteps(effects, "noise")) chain.push(`noise=c0s=${Math.round(level * 40)}:c0f=t+u:enable='${enableExpr(windows)}'`);
+  const mono = channelSteps(effects, "mono").flatMap((s) => s.windows);
+  if (mono.length) chain.push(`hue=s=0:enable='${enableExpr(mono)}'`);
+  const invert = channelSteps(effects, "invert").flatMap((s) => s.windows);
+  if (invert.length) chain.push(`negate=enable='${enableExpr(invert)}'`);
   const white = channelExpr(effects, "white", "t");
   if (white !== "0") chain.push(`eq=contrast='1-${white}':brightness='if(gt(${white},0),0.4188*${white}+0.005,0)':saturation='1-${white}':eval=frame`);
   const black = channelExpr(effects, "black", "t");
@@ -1658,7 +2122,19 @@ function renderBase(input: string, chain: string, duration: number, out: string)
  * captions, hook and watermark on top. "Behind you" draws its big words on the picture first and lays the speaker's
  * cut-out back over them.
  */
-function render(picture: string, chain: string | null, look: string, audio: string, assFile: string, behind: { file: string; mask: string | null } | null, frame: Frame, emojis: EmojiShot[], sequences: Map<string, string>, duration: number, out: string, broll: { file: string; at: number; length: number }[] = []) {
+/** The light leaks' layer: a small warm source whose alpha follows their curve (LEAK in effects.ts), or null. */
+function leakLayer(effects: PlacedEffect[], duration: number): { source: string; enable: string } | null {
+  const k = channelExpr(effects, "leak", "T");
+  if (k === "0") return null;
+  // Along the diagonal s = (X/W + Y/H) / 2: full to LEAK.full, gone by LEAK.gone, straight in between (CSS's gradient).
+  const fade = `clip((${LEAK.gone}-(X/W+Y/H)/2)/${(LEAK.gone - LEAK.full).toFixed(4)},0,1)`;
+  return {
+    source: `color=c=black:s=96x96:r=${FPS}:d=${duration.toFixed(3)},format=rgba,geq=r='${LEAK.r}':g='${LEAK.g}':b='${LEAK.b}':a='255*(${k})*${fade}'`,
+    enable: enableExpr(channelWindows(effects, "leak")),
+  };
+}
+
+function render(picture: string, chain: string | null, look: string, audio: string, assFile: string, behind: { file: string; mask: string | null } | null, frame: Frame, emojis: EmojiShot[], sequences: Map<string, string>, duration: number, out: string, broll: { file: string; at: number; length: number }[] = [], effects: PlacedEffect[] = []) {
   const { width: W, height: H } = frame;
   let graph = [`[0:v:0]${chain ?? "null"}[v0]`];
   const inputs: string[] = [];
@@ -1688,6 +2164,13 @@ function render(picture: string, chain: string | null, look: string, audio: stri
   if (look) {
     graph.push(`[${last}]${look}[vl]`);
     last = "vl";
+  }
+  // Light leaks: a warm layer from the top left, faded along the diagonal and by the effects' curve, drawn small (it's a
+  // smooth gradient) and scaled up, laid over only while one runs.
+  const leak = leakLayer(effects, duration);
+  if (leak) {
+    graph.push(`${leak.source},scale=${W}:${H}:flags=bilinear[lk]`, `[${last}][lk]overlay=enable='${leak.enable}'[vk]`);
+    last = "vk";
   }
   const firstExtra = 2 + inputs.length / 2; // input numbers after the picture, the audio, the mask and the B-roll
   const placed = emojis.filter((e) => sequences.has(e.emoji));
@@ -1746,6 +2229,30 @@ const costOf = (model: string) => {
   }
 };
 
+/**
+ * A product video's words: the narration as its captions show it (the voice tool's captions.json, on the video's
+ * clock), each one the caption fonts can draw, in order, inside the video. None without a narration.
+ */
+function scriptWords(file: string | null, duration: number): Word[] {
+  if (!file || !existsSync(file)) return [];
+  let data: { words?: { text?: unknown; start?: unknown; end?: unknown }[] };
+  try {
+    data = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return [];
+  }
+  const words: Word[] = [];
+  for (const w of Array.isArray(data.words) ? data.words : []) {
+    const text = cleanWordText(w?.text);
+    const start = Number(w?.start);
+    const end = Number(w?.end);
+    if (!text || !(start >= 0) || !(end > start) || start >= duration) continue;
+    if (words.length && start < words[words.length - 1].start) continue;
+    words.push({ text, start: round(start), end: round(Math.min(end, duration)) });
+  }
+  return words;
+}
+
 async function main() {
   const started = Date.now();
   const spec = JSON.parse(readFileSync(join(ROOT, "reel.json"), "utf8")) as ReelSpec;
@@ -1754,27 +2261,47 @@ async function main() {
   let timedMinutes = 0;
   const cost = () => costOf(spec.model) + timedMinutes * (process.env.HYPED_TIMINGS_URL ? VOICE_TIMINGS_USD_PER_MINUTE : WHISPER_USD_PER_MINUTE);
   try {
-    const input = join(ROOT, spec.input);
-    if (!existsSync(input)) throw new Error(`Upload missing: ${spec.input}`);
-    const source = probe(input);
+    const video = spec.video ?? null;
+    const upload = join(ROOT, spec.input);
+    if (!existsSync(upload)) throw new Error(`Upload missing: ${spec.input}`);
+    const source = probe(upload);
     if (source.duration > spec.maxSeconds) throw new Error(`Too long: the video runs ${source.duration.toFixed(1)} s and this job covers ${spec.maxSeconds} s`);
-    if (!source.hasAudio) throw new Error("No speech: the video has no sound");
+    if (!source.hasAudio && !video) throw new Error("No speech: the video has no sound");
     const duration = round(source.duration);
     const frame = outputSize(source.width, source.height);
-    log(`${source.width}×${source.height} ${duration} s${source.hdr ? " HDR" : ""} → ${frame.width}×${frame.height}, ${spec.options.style}`);
+    log(`${source.width}×${source.height} ${duration} s${source.hdr ? " HDR" : ""} → ${frame.width}×${frame.height}, ${captionsOn(spec.options) ? spec.options.style : "no captions"}`);
+    const edited = spec.edit ? parseReelEdit(JSON.parse(readFileSync(join(ROOT, "edit.json"), "utf8"))) : null;
+    if (spec.edit && !edited) throw new Error("Edit missing: the edited reel's words couldn't be read");
 
-    // 1. The words, timed: heard, or (re-exporting an edited reel) as edited.
+    // A product video keeps its own soundtrack (narration, music and sound effects as made), unless the edit changes
+    // the music: then the sound starts from the narration alone (or silence, without one), as a reel's starts from
+    // the speaker's voice, and the new bed goes under it.
+    let input = upload;
+    if (video) {
+      const own = source.hasAudio && (edited ? edited.audio.music?.track === ORIGINAL_MUSIC : true);
+      if (!own) {
+        const narration = video.voice ? join(ROOT, video.voice) : null;
+        if (narration && !existsSync(narration)) throw new Error(`Upload missing: ${video.voice}`);
+        input = join(WORK, "input.mkv");
+        const sound = narration ? ["-i", narration] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"];
+        ffmpeg(["-i", upload, ...sound, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", `apad=whole_dur=${duration}`, "-c:a", "pcm_s16le", "-t", String(duration), input]);
+        log(narration ? "sound: the narration alone, for a new bed" : "sound: silence, for a new bed");
+      }
+    }
+
+    // 1. The words, timed: heard, from a product video's script, or (re-exporting an edited reel) as edited.
     const speech = join(WORK, "speech.wav");
     ffmpeg(["-i", input, "-map", "0:a:0", "-vn", "-af", "aresample=16000:first_pts=0", "-ac", "1", "-c:a", "pcm_s16le", speech]);
     const speechLufs = loudness(speech);
-    if (speechLufs < -60) throw new Error("No speech: the sound track is silent");
-    const edited = spec.edit ? parseReelEdit(JSON.parse(readFileSync(join(ROOT, "edit.json"), "utf8"))) : null;
-    if (spec.edit && !edited) throw new Error("Edit missing: the edited reel's words couldn't be read");
+    if (speechLufs < -60 && !video) throw new Error("No speech: the sound track is silent");
     let words: Word[];
     const pauses = silences(speech);
     if (edited) {
       words = edited.words;
       log(`${words.length} words, as edited`);
+    } else if (video) {
+      words = scriptWords(video.words ? join(ROOT, video.words) : null, duration);
+      log(words.length ? `${words.length} words, from the narration's script` : "no narration: no words");
     } else {
       const heard = await transcribeAll(speech, duration, spec.options.language, pauses);
       timedMinutes = duration / 60;
@@ -1792,7 +2319,11 @@ async function main() {
     let edit: ReelEdit;
     let planned = "edit";
     if (edited) edit = edited;
-    else {
+    else if (video) {
+      // As it was made: the words, its own soundtrack, nothing added (the cuts are found with the preview, below).
+      edit = { ...blankEdit(duration, frame.width, frame.height, words), audio: { clean: false, music: source.hasAudio ? { track: ORIGINAL_MUSIC, volume: MUSIC_DEFAULT_VOLUME } : null } };
+      planned = "as made";
+    } else {
       // What the AI cuts (every cut can be put back in the editor): long pauses; with "full", filler sounds and retakes.
       let trims: Trim[] = [];
       if (spec.options.cleanup !== "off") {
@@ -1846,21 +2377,30 @@ async function main() {
     // The video as it plays: the edit on the cut clock, made from the upload with its trims cut out.
     const view = onCutTimeline(edit);
     const length = view.duration;
+    // The transitions, where they play on the cut clock (made in the cut pass, which they need even without trims), and
+    // the effects some bring over their joints, drawn with the edit's own.
+    const joints = transitionJoints(edit);
+    const effects = joints.length ? [...view.effects, ...transitionEffects(joints)].sort((a, b) => a.at - b.at) : view.effects;
     let media = input;
     let mediaSource = source;
-    if (edit.trims.length) {
+    if (edit.trims.length || joints.length) {
       media = join(WORK, "cut.mkv");
-      cutUpload(input, source, frame, edit.trims, duration, media);
+      cutUpload(input, source, frame, edit.trims, duration, media, joints);
       mediaSource = probe(media);
-      const t = trimTotals(edit.trims);
-      log(`cut ${edit.trims.length} stretches (${(["pause", "filler", "retake", "cut"] as const).filter((r) => t[r].count).map((r) => `${t[r].count} ${r}${t[r].count > 1 ? "s" : ""} ${t[r].seconds.toFixed(1)} s`).join(", ")}): ${clock(duration)} → ${clock(length)}`);
+      if (edit.trims.length) {
+        const t = trimTotals(edit.trims);
+        log(`cut ${edit.trims.length} stretches (${(["pause", "filler", "retake", "cut"] as const).filter((r) => t[r].count).map((r) => `${t[r].count} ${r}${t[r].count > 1 ? "s" : ""} ${t[r].seconds.toFixed(1)} s`).join(", ")}): ${clock(duration)} → ${clock(length)}`);
+      }
+      if (joints.length) log(`${joints.length} transitions: ${joints.map((j) => `${j.kind} ${clock(j.joint)}`).join(", ")}`);
     }
-    const groups = captionLines(view.words, style, look, view);
+    // With captions off (a product video can turn them off), the lines still time the punch-ins and emojis.
+    const lines = captionLines(view.words, style, look, view);
+    const groups = captionsOn(spec.options) ? lines : [];
     const keywords = new Set(view.keywords);
     const hook = spec.options.hook ? cleanHook(view.hook) : "";
-    const zooms = spec.options.zooms ? zoomWindows(view, groups) : [];
-    const chain = pictureChain(frame, mediaSource, zooms, view.effects);
-    const lookFilters = lookChain(frame, view.picture, view.effects);
+    const zooms = spec.options.zooms ? zoomWindows(view, lines) : [];
+    const chain = pictureChain(frame, mediaSource, zooms, effects);
+    const lookFilters = lookChain(frame, view.picture, effects);
     const assFile = join(WORK, "captions.ass");
     let picture = media;
     let behind: { file: string; mask: string | null } | null = null;
@@ -1879,7 +2419,7 @@ async function main() {
       writeFileSync(behind.file, built.behind);
       placements = built.placements;
     } else {
-      const shows = spec.options.emojis ? emojiShows(view, groups) : [];
+      const shows = spec.options.emojis ? emojiShows(view, lines) : [];
       const built = buildAss(groups, keywords, shows, view.emojiStyle, hook, look, frame, spec, length);
       writeFileSync(assFile, built.ass);
       emojis = built.emojis;
@@ -1895,44 +2435,71 @@ async function main() {
       // it skipping the trims, so any of them can be put back.
       const gain = Math.max(-12, Math.min(24, -16 - speechLufs)).toFixed(1);
       const preview = join(OUT, "preview.mp4");
-      ffmpeg(["-i", input, "-filter_complex", `[0:v:0]${pictureChain(frame, source, [], [])},scale=${even(frame.width / 2)}:${even(frame.height / 2)}[v]`, "-map", "[v]", "-map", "0:a:0", "-af", `volume=${gain}dB`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-t", String(duration), "-movflags", "+faststart", preview], limitFor(duration, 10, 0.75));
+      // A product video's soundtrack is mastered already, and in stereo.
+      const sound = video ? ["-c:a", "aac", "-b:a", "128k"] : ["-af", `volume=${gain}dB`, "-c:a", "aac", "-b:a", "64k", "-ac", "1"];
+      ffmpeg(["-i", input, "-filter_complex", `[0:v:0]${pictureChain(frame, source, [], [])},scale=${even(frame.width / 2)}:${even(frame.height / 2)}[v]`, "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-pix_fmt", "yuv420p", ...sound, "-t", String(duration), "-movflags", "+faststart", preview], limitFor(duration, 10, 0.75));
       edit.cuts = findCuts(preview);
+      // The narration alone, for the editor to play under a new bed.
+      if (video?.voice) ffmpeg(["-i", join(ROOT, video.voice), "-map", "0:a:0", "-c:a", "aac", "-b:a", "96k", "-ac", "1", join(OUT, "voice.m4a")]);
     }
     // What the editor opens to change this reel later (the hook is kept even when it's switched off, so switching it
     // back on brings it back), and for support, what was decided.
     writeFileSync(join(OUT, "edit.json"), JSON.stringify(edit));
-    writeFileSync(join(WORK, "edit.json"), JSON.stringify({ edit, zooms, emojis: shownEmojis, placements, cues }, null, 1));
+    writeFileSync(join(WORK, "edit.json"), JSON.stringify({ edit, zooms, emojis: shownEmojis, placements, cues, ...(joints.length ? { transitions: joints } : {}) }, null, 1));
+    // An older product video made ready to edit: the video itself stays as it is.
+    if (video?.editorOnly) {
+      log(`ready to edit: ${words.length} words, ${edit.cuts.length} shot changes`);
+      finish({
+        ok: true,
+        engine: "openai",
+        model: spec.model,
+        numTurns: 0,
+        usage,
+        llmCostUsd: 0,
+        sdkReportedCostUsd: 0,
+        durationMs: Date.now() - started,
+        files: { edit: "out/edit.json", preview: "out/preview.mp4", ...(video.voice ? { voice: "out/voice.m4a" } : {}) },
+        shareCopy: null,
+        plan: null,
+      });
+      return;
+    }
     const audio = join(WORK, "audio.m4a");
-    mixAudio(media, cues, speechLufs, length, audio, view.audio);
+    // Uncut, the sound is the upload's own (the cut pass ran only for the transitions' picture).
+    mixAudio(edit.trims.length ? media : input, cues, speechLufs, length, audio, view.audio);
     const broll = view.broll.length ? await downloadBroll(view.broll, join(WORK, "broll")) : [];
-    const video = join(OUT, "brag.mp4");
-    render(picture, behind ? null : chain, lookFilters, audio, assFile, behind, frame, shownEmojis, sequences, length, video, broll);
-    rmSync(input, { force: true }); // the upload can be gigabytes; the render is done with it
+    const output = join(OUT, "brag.mp4");
+    render(picture, behind ? null : chain, lookFilters, audio, assFile, behind, frame, shownEmojis, sequences, length, output, broll, effects);
+    rmSync(upload, { force: true }); // the upload can be gigabytes; the render is done with it
+    if (input !== upload) rmSync(input, { force: true });
     if (media !== input) rmSync(media, { force: true });
 
     // 4. Poster (the hook, the first big word, or the first line with a highlight or an emoji) and SRT (shown words only).
     const firstBig = placements.find((p) => p.end - p.start >= 0.8);
     const marked = new Set([...view.keywords, ...view.emojis.map((e) => e.word)]);
     const posterAt = hook ? 1.2 : firstBig ? firstBig.start + 0.5 : (groups.find((g) => g.words.some((w) => marked.has(w.i)))?.start ?? 0) + 0.4;
-    ffmpeg(["-ss", String(Math.min(posterAt, length / 2)), "-i", video, "-frames:v", "1", "-q:v", "3", join(OUT, "brag.jpg")]);
+    // A product video keeps the poster its agent chose.
+    if (!video) ffmpeg(["-ss", String(Math.min(posterAt, length / 2)), "-i", output, "-frames:v", "1", "-q:v", "3", join(OUT, "brag.jpg")]);
     const hidden = new Set(view.hidden);
-    writeFileSync(join(OUT, "captions.srt"), srtCues(view.words.filter((_, i) => !hidden.has(i)), new Set()));
+    const srt = !video || view.words.length > 0;
+    if (srt) writeFileSync(join(OUT, "captions.srt"), srtCues(view.words.filter((_, i) => !hidden.has(i)), new Set()));
 
     const summary = [
       hook ? `Hook: "${hook}"` : "No hook title",
       ...(edit.trims.length ? [`Cut: ${edit.trims.length} stretches, ${clock(duration)} to ${clock(length)}`] : []),
-      `Captions: ${style}, ${groups.length} lines, ${edit.words.length} words${hidden.size ? ` (${hidden.size} hidden or cut)` : ""}`,
+      groups.length ? `Captions: ${style}, ${groups.length} lines, ${edit.words.length} words${hidden.size ? ` (${hidden.size} hidden or cut)` : ""}` : "No captions",
       zooms.length ? `Punch-ins: ${zooms.map((z) => clock(z.start)).join(", ")}` : "No punch-ins",
       ...(style === "behind"
         ? [`Big words: ${placements.length}, ${placements.filter((p) => p.front).length} in front of the speaker`]
         : [shownEmojis.length ? `Emojis: ${shownEmojis.map((e) => `${e.emoji} ${clock(e.start)}`).join(", ")}` : "No emojis"]),
       view.effects.length ? `Effects: ${view.effects.map((e) => `${e.effect} ${clock(e.at)}`).join(", ")}` : "No effects",
+      ...(joints.length ? [`Transitions: ${joints.map((j) => `${j.kind} ${clock(j.joint)}`).join(", ")}`] : []),
       ...(view.picture.filter !== "none" || view.picture.grain || view.picture.vignette || view.picture.letterbox
         ? [`Look: ${[view.picture.filter !== "none" && view.picture.filter, view.picture.grain && "grain", view.picture.vignette && "vignette", view.picture.letterbox && "letterbox"].filter(Boolean).join(", ")}`]
         : []),
       `Sound effects: ${cues.length}`,
       view.broll.length ? `B-roll: ${view.broll.map((b) => `"${b.query}" ${clock(b.at)}`).join(", ")}` : "No B-roll",
-      `Audio: ${view.audio.clean ? "noise cleaned" : "as recorded"}${view.audio.music ? `, music "${REEL_MUSIC[view.audio.music.track].label}" at ${Math.round(view.audio.music.volume * 100)}%` : ", no music"}`,
+      `Audio: ${view.audio.clean ? "noise cleaned" : "as recorded"}${view.audio.music?.track === ORIGINAL_MUSIC ? ", its own soundtrack" : view.audio.music ? `, music "${REEL_MUSIC[view.audio.music.track].label}" at ${Math.round(view.audio.music.volume * 100)}%` : ", no music"}`,
     ];
     log(`${summary.join(" | ")} | plan: ${planned}`);
     finish({
@@ -1944,7 +2511,14 @@ async function main() {
       llmCostUsd: cost(),
       sdkReportedCostUsd: 0,
       durationMs: Date.now() - started,
-      files: { video: "out/brag.mp4", poster: "out/brag.jpg", captions: "out/captions.srt", edit: "out/edit.json", ...(spec.edit ? {} : { preview: "out/preview.mp4" }) },
+      files: {
+        video: "out/brag.mp4",
+        ...(video ? {} : { poster: "out/brag.jpg" }),
+        ...(srt ? { captions: "out/captions.srt" } : {}),
+        edit: "out/edit.json",
+        ...(spec.edit ? {} : { preview: "out/preview.mp4" }),
+        ...(video?.voice && !spec.edit ? { voice: "out/voice.m4a" } : {}),
+      },
       shareCopy: null,
       plan: summary.join("\n"),
     });
@@ -1966,7 +2540,7 @@ async function main() {
   }
 }
 
-// REEL_TEST=1: imported by tests for the caption writer (buildAss), without running a job.
+// REEL_TEST=1: imported by tests for the caption writers (buildAss, buildBehind), without running a job.
 if (process.env.REEL_TEST !== "1") await main();
 
-export { buildAss, lookFor };
+export { BIG_LOOKS, buildAss, buildBehind, lookFor };

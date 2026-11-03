@@ -46,7 +46,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const user = await requireUser();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "That message couldn't be read." }, { status: 400 });
-  const job = isDemo ? (demoJobs().find((j) => j.id === id && j.kind === "reel") ?? null) : await (await getDb()).job.findFirst({ where: { id, userId: user.id, kind: "reel" } });
+  const job = isDemo ? (demoJobs().find((j) => j.id === id && j.kind === "reel") ?? null) : await (await getDb()).job.findFirst({ where: { id, userId: user.id, kind: { in: ["reel", "video"] } } });
   const reel = job ? parseReel(job.reel) : null;
   if (!job || !reel) return NextResponse.json({ error: "Reel not found" }, { status: 404 });
   const editable = reelEditable(job, reel);
@@ -58,9 +58,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!edit) return NextResponse.json({ error: "The reel's edits couldn't be read. Reload the editor and try again." }, { status: 400 });
   const draft = { options: parsed.data.draft.options, edit };
   try {
-    const answer = await askAssistant(withSelection(chatContext(draft, parsed.data.time), parsed.data.selection), parsed.data.message);
+    const answer = await askAssistant(withSelection(chatContext(draft, parsed.data.time, reel.video), parsed.data.selection), parsed.data.message);
     if (!answer) return NextResponse.json({ error: "Chat edits aren't available here yet." }, { status: 503 });
-    const checked = parseChatOps(answer.ops, edit);
+    const checked = parseChatOps(answer.ops, edit, reel.video);
     const { ops, missing } = checked.some(needsFootage) ? await withFootage(checked, edit) : { ops: checked, missing: [] };
     console.log(`[reel-chat] ${id}: ${ops.length} changes, ${answer.inputTokens}+${answer.outputTokens} tokens`);
     const reply = answer.reply || (ops.length ? "Done." : "I couldn't make that change.");
