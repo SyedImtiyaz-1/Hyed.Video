@@ -1,23 +1,12 @@
 import { NextResponse } from "next/server";
 import { BROLL_LENGTH, chatContext, longestShot, needsFootage, parseChatOps, parseClip, parseReel, parseReelEdit, reelEditable, sameClip, type BrollClip, type ChatOp, type ReelEdit } from "@launchreel/core";
 import { ChatBody as Body, withSelection } from "@/lib/chat-body";
+import { chatAllowed as allowed } from "@/lib/chat-limit";
 import { getDb } from "@/lib/db";
 import { demoJobs, isDemo } from "@/lib/demo";
 import { askAssistant, searchStock } from "@/lib/reel-assistant";
 import { readEdit } from "@/lib/reel-edits";
 import { requireUser } from "@/lib/user";
-
-// Chat edits are free, but not unlimited: per person, in each Worker instance (a best-effort guard against loops).
-const WINDOW_MS = 10 * 60_000;
-const PER_WINDOW = 30;
-const recent = new Map<string, number[]>();
-function allowed(userId: string) {
-  const now = Date.now();
-  const times = (recent.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (times.length >= PER_WINDOW) return false;
-  recent.set(userId, [...times, now]);
-  return true;
-}
 
 /**
  * B-roll the assistant asked for, found: a stock search for each (four at most a message), and its first clip that's

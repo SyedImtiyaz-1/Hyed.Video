@@ -39,6 +39,7 @@
     "./music-beds": "./src/music-beds.ts",
     "./edit-styles": "./src/edit-styles.ts",
     "./reel-chat": "./src/reel-chat.ts",
+    "./project-chat": "./src/project-chat.ts",
     "./broll": "./src/broll.ts"
   }
 }

@@ -167,6 +167,8 @@ Syed's plan. Done so far:
   prompt box starts the video at once and opens the editor on its first cut; the editor gets Cardboard's layout
   (tools, preview, Ask AI always open, timeline) and an export dialog. Part B, with Syed on the render side: Phase 2's
   layouts (edit model v2), more looks and the Director agent; 4K and 60 fps stay in Phase 3. Recipes' M2 and M3 follow.
+- **A desktop app (3 November):** a Hyped app for Mac, then Windows, as Cardboard has its Mac app, so Ask AI can bring a
+  video in from Downloads with no file window (a web page can't). The plan, with Syed's open choices: `docs/DESKTOP_APP.md`.
 
 The others are still open; recommendation first in each.
 
