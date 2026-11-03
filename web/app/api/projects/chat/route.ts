@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   try {
     const answer = await askProjectAssistant(input);
     if (!answer) return NextResponse.json({ error: "Ask AI isn't available here yet." }, { status: 503 });
-    return NextResponse.json({ reply: answer.reply, pick: answer.pick, keep: answer.keep });
+    return NextResponse.json({ reply: answer.reply, pick: answer.pick, file: answer.file, keep: answer.keep });
   } catch (err) {
     console.error("[project-chat]", err);
     return NextResponse.json({ error: "The assistant didn't answer. Try again in a moment." }, { status: 502 });

@@ -101,9 +101,19 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   state. Ask AI works in the empty editor too, before any clip (Taibanaz, 2 Nov): it only answers what's asked and never
   acts on its own (`packages/core/src/project-chat.ts`, `/api/projects/chat`, the render Worker's
   `ReelAssistant.projectChat`, or the root .env's key in local development without the render Worker). "Pull my video
-  from Downloads" gets an Open Downloads button (the browser's file picker opening there; a web page can't reach files
-  itself); an edit asked for before the clip is kept ("Waiting for your clip: …") and typed into the editor's Ask AI
-  once the clip is in, for her to send (the reel's notes when uploaded). Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
+  from Downloads" (or a pasted path) opens the file window there at once, with no button (Taibanaz, 3 Nov; `pickAsked`
+  spots the ask, since a browser opens the picker only inside her own Enter or click, and no web page can take a file
+  from a folder without that one pick), and the Library shows the file asked for until it's chosen. The chosen clip
+  shows in the Library, then the editor opens on it with its Media tab. An edit asked for before the clip is kept
+  ("Waiting for your clip: …") and typed into the editor's Ask AI once the clip is in, for her to send (the reel's notes
+  when uploaded). Opening a file with no pick at all takes a desktop app: decided (Taibanaz, 3 Nov), planned in
+  `docs/DESKTOP_APP.md` (Electron shell around hyped.video, a read-only bridge to allowed folders; Mac first), for Syed to build.
+  Until then, local development only (Taibanaz, 3 Nov): the dev server reads the video itself (`/api/local/file`: a
+  pasted path, else the named or newest video in that folder, videos inside the home folder only, read-only, 404 in
+  production), so it comes straight into the Library with no window; Ask AI is told it was found. A video Ask AI brings
+  in waits in the Library, and a click on it opens the editor on it (Taibanaz, 3 Nov; Import media, Add and a drop
+  still open at once). Ask AI is blank until the first message, its box too: no intro, suggestions or placeholder, in
+  the empty editor and the editor alike, as Cardboard's (Taibanaz, 3 Nov). Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
 - Syed's editor spec ("Video Editor Prompt", Slack 29 Oct: a four-zone workspace, phase 1), the parts added on
   `launch/realtime-editor` (2 Nov, in PR #13): a Media tab (`media-panel.tsx`); Ask AI answers list what they
   changed with Undo this for that answer alone (`chat-steps.ts`), the box shows "At 0:12 · what's picked" and sends the

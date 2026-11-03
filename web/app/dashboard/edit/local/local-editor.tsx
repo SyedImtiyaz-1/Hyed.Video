@@ -178,6 +178,7 @@ export function LocalEditor() {
         notice={notes.length ? notes : undefined}
         askFirst={chat?.ask}
         chatBefore={chat?.messages}
+        startOnMedia
       />
     );
   }

@@ -1,31 +1,22 @@
 "use client";
-import { ArrowUp, Check, LoaderCircle, Sparkles, Undo2 } from "lucide-react";
+import { ArrowUp, Check, LoaderCircle, Undo2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { cn } from "@/lib/cn";
 
 /** A message: what the customer asked, or the assistant's answer with what it changed (`step`: the editor's id for it). */
 export type ChatMessage = { from: "you" | "ai"; text: string; changes?: string[]; step?: number; failed?: boolean };
 
-/** What the panel says before the first message: a title, a line, and requests to send with a click. */
-export type ChatIntro = { title: string; text: string; suggestions: readonly string[] };
-
-const EDIT_INTRO: ChatIntro = {
-  title: "Tell it what to change",
-  text: "Anything the editor can do: caption words, colours, fonts and size, cuts, emojis, punch-ins, sounds, effects, music, B-roll, the hook or the look. Pick something on the timeline first to ask about just that. You can undo each answer.",
-  suggestions: ["Yellow captions with a pink highlight", "Two words at a time, a bit higher", "Cut the long pauses", "Add B-roll of a laptop here", "Black and white, but subtle", "A flash on every cut", "Calm music, quieter"],
-};
 // The box grows with what's typed, up to this many lines, then scrolls.
 const MAX_LINES = 6;
 
 /**
  * Editing by typing: what the customer asks, and what the assistant changed, a short list under each answer with Undo
  * this (it takes back that answer alone; `canUndo` says whether there's anything left to take back). Nothing is saved
- * until export. `draft`: a request typed in beforehand, waiting to be sent. `context`: what the assistant will look at
- * (the playhead, what's selected), shown over the box. `fill`: as tall as its column, the messages taking the room.
- * `intro` and `placeholder`: for a panel that asks about something else (a new project's, before its clip); `footer`:
- * anything under an answer (an offer to act, which the customer clicks: the assistant never acts on its own).
+ * until export. Blank until the first message, the box too, as Cardboard's chat (Taibanaz, 3 Nov). `draft`: a request
+ * typed in beforehand, waiting to be sent. `context`: what the assistant will look at (the playhead, what's selected),
+ * shown over the box. `fill`: as tall as its column, the messages taking the room.
  */
-export function ChatPanel<M extends ChatMessage>({
+export function ChatPanel({
   messages,
   busy,
   onSend,
@@ -35,22 +26,16 @@ export function ChatPanel<M extends ChatMessage>({
   context,
   inputRef,
   fill,
-  intro = EDIT_INTRO,
-  placeholder = "Make the captions bigger and add a whoosh when I say pricing",
-  footer,
 }: {
-  messages: M[];
+  messages: ChatMessage[];
   busy: boolean;
   onSend: (text: string) => void;
-  onUndo: (message: M) => void;
-  canUndo: (message: M) => boolean;
+  onUndo: (message: ChatMessage) => void;
+  canUndo: (message: ChatMessage) => boolean;
   draft?: string;
   context?: string;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   fill?: boolean;
-  intro?: ChatIntro;
-  placeholder?: string;
-  footer?: (message: M) => React.ReactNode;
 }) {
   const [text, setText] = useState(draft ?? "");
   const list = useRef<HTMLDivElement>(null);
@@ -77,51 +62,33 @@ export function ChatPanel<M extends ChatMessage>({
   return (
     <div className={cn("flex flex-col gap-3", fill && "h-full")}>
       <div ref={list} className={cn("min-h-[140px] space-y-2 overflow-y-auto rounded-lg border border-gray-alpha-400 p-3", fill ? "max-h-[420px] flex-1 lg:max-h-none" : "max-h-[420px]")} aria-live="polite">
-        {messages.length === 0 ? (
-          <div>
-            <p className="flex items-center gap-1.5 text-sm font-medium text-gray-1000">
-              <Sparkles className="size-3.5" />
-              {intro.title}
-            </p>
-            <p className="mt-0.5 text-[13px] text-gray-900">{intro.text}</p>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {intro.suggestions.map((s) => (
-                <button key={s} type="button" onClick={() => send(s)} disabled={busy} className="h-8 rounded-full border border-gray-alpha-400 px-3 text-[13px] text-gray-1000 hover:bg-gray-alpha-100 disabled:opacity-50">
-                  {s}
-                </button>
-              ))}
+        {messages.map((m, i) => (
+          <div key={i} className={cn("flex", m.from === "you" ? "justify-end" : "justify-start")}>
+            <div className={cn("max-w-[85%] rounded-lg px-3 py-2 text-[13px] leading-relaxed [overflow-wrap:anywhere]", m.from === "you" ? "bg-gray-1000 text-background-100" : m.failed ? "border border-red-500/40 text-red-900" : "bg-gray-alpha-100 text-gray-1000")}>
+              {m.text}
+              {m.from === "ai" && Boolean(m.changes?.length) && (
+                <>
+                  <ul className="mt-1.5 space-y-0.5 border-t border-gray-alpha-300 pt-1.5 text-xs text-gray-900">
+                    {m.changes!.map((c) => (
+                      <li key={c} className="flex items-center gap-1.5">
+                        <Check className="size-3 shrink-0" />
+                        {c}
+                      </li>
+                    ))}
+                  </ul>
+                  {canUndo(m) ? (
+                    <button type="button" onClick={() => onUndo(m)} className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-1000 underline-offset-2 hover:underline">
+                      <Undo2 className="size-3" />
+                      Undo this
+                    </button>
+                  ) : (
+                    <span className="mt-1.5 block text-xs text-gray-900">Undone</span>
+                  )}
+                </>
+              )}
             </div>
           </div>
-        ) : (
-          messages.map((m, i) => (
-            <div key={i} className={cn("flex", m.from === "you" ? "justify-end" : "justify-start")}>
-              <div className={cn("max-w-[85%] rounded-lg px-3 py-2 text-[13px] leading-relaxed", m.from === "you" ? "bg-gray-1000 text-background-100" : m.failed ? "border border-red-500/40 text-red-900" : "bg-gray-alpha-100 text-gray-1000")}>
-                {m.text}
-                {m.from === "ai" && Boolean(m.changes?.length) && (
-                  <>
-                    <ul className="mt-1.5 space-y-0.5 border-t border-gray-alpha-300 pt-1.5 text-xs text-gray-900">
-                      {m.changes!.map((c) => (
-                        <li key={c} className="flex items-center gap-1.5">
-                          <Check className="size-3 shrink-0" />
-                          {c}
-                        </li>
-                      ))}
-                    </ul>
-                    {canUndo(m) ? (
-                      <button type="button" onClick={() => onUndo(m)} className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-1000 underline-offset-2 hover:underline">
-                        <Undo2 className="size-3" />
-                        Undo this
-                      </button>
-                    ) : (
-                      <span className="mt-1.5 block text-xs text-gray-900">Undone</span>
-                    )}
-                  </>
-                )}
-                {m.from === "ai" && footer?.(m)}
-              </div>
-            </div>
-          ))
-        )}
+        ))}
         {busy && (
           <div className="flex items-center gap-2 text-[13px] text-gray-900">
             <LoaderCircle className="size-3.5 animate-spin" />
@@ -150,9 +117,8 @@ export function ChatPanel<M extends ChatMessage>({
             }}
             rows={2}
             maxLength={1000}
-            placeholder={placeholder}
-            aria-label="What to change"
-            className="min-h-[44px] flex-1 resize-none bg-transparent px-1.5 py-1 text-sm text-gray-1000 outline-none placeholder:text-gray-900"
+            aria-label="Ask AI"
+            className="min-h-[44px] flex-1 resize-none bg-transparent px-1.5 py-1 text-sm text-gray-1000 outline-none"
           />
           <button type="submit" disabled={busy || !text.trim()} aria-label="Send" className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gray-1000 text-background-100 disabled:opacity-40">
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}

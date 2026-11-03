@@ -81,6 +81,7 @@ export function ReelEditor({
   startAt,
   askFirst,
   chatBefore,
+  startOnMedia = false,
   watermark = false,
   local = false,
   heard,
@@ -99,6 +100,8 @@ export function ReelEditor({
   askFirst?: string;
   /** What was said to Ask AI before the clip was in (a new project's empty editor): Ask AI carries on from it. */
   chatBefore?: ChatMessage[];
+  /** The tools' panel starts on Media, the clip in the library (a clip just brought in from this computer). */
+  startOnMedia?: boolean;
   /** A free-trial reel: it exports with the "Made with Hyped" mark (the export dialog says so). */
   watermark?: boolean;
   /**
@@ -115,7 +118,7 @@ export function ReelEditor({
   const [history, setHistory] = useState<History>({ past: [], present: { options, edit }, future: [] });
   const [exported, setExported] = useState<Draft>({ options, edit });
   const draft = history.present;
-  const [tab, setTab] = useState<Tab>(askFirst ? "Ask AI" : "Style");
+  const [tab, setTab] = useState<Tab>(startOnMedia ? "Media" : askFirst ? "Ask AI" : "Style");
   // Until it's sent once: the chat panel starts again each time its tab opens.
   const [asked, setAsked] = useState(askFirst);
   const [selected, setSelected] = useState<number | null>(null);
