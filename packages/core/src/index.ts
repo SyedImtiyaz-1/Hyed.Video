@@ -20,4 +20,5 @@ export * from "./trims";
 export * from "./music-beds";
 export * from "./edit-styles";
 export * from "./reel-chat";
+export * from "./project-chat";
 export * from "./broll";

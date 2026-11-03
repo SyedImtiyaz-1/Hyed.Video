@@ -33,7 +33,11 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   go to `launch/caption-styles` (Taibanaz, 29 Oct). PR #11 `fix/open-dashboard-link` (a spinner on the landing page's
   dashboard buttons; Turbopack for demo mode; the template modal on phones) merged, then PR #12 merged
   `launch/caption-styles` into `main` again (29 Oct). The 29–30 Oct work below (landing vs dashboard, Editor first part A,
-  E1, the local editor) is PR #13 (2 Nov, `launch/realtime-editor` → `launch/caption-styles`), open for Syed's review.
+  E1, the local editor, the editor's full window, the sidebar) is PR #13 (`launch/realtime-editor`), merged 2 Nov; PR #14
+  merged `launch/caption-styles` into `main` the same day. The 2–3 Nov work after it (Ask AI before the clip, the
+  Library and click-to-open, blank Ask AI, `/api/local/file`, the desktop app plan, the Home greeting, Settings) is
+  PR #15 (3 Nov, `launch/ask-ai-settings` → `launch/caption-styles`), open for Syed's review; it adds
+  `ReelAssistant.projectChat` to the render Worker, so render deploys with or before web.
 - PR #6, `launch/landing-refresh` (27 Oct): a Cardboard-style landing page (full-screen hero
   with a prompt box: link + words + recipe menu + clip upload, "Auto" picks a recipe in `web/lib/prompt.ts`; floating
   sample tiles; a timeline ruler; the recipes gallery right below; then the examples strip, feature bento, pricing) and Recipes M1 (`packages/core/src/recipes.ts`, `/recipes`,
@@ -63,7 +67,15 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   own clips and Syed's full stack; one `SHOWCASE` line each, with `template: "reel-<style>"`).
 - Landing and dashboard, told apart as Cardboard's are (Taibanaz, 29 Oct, in PR #13): the dashboard is a clean
   workspace (prompt box, category chips that open their templates, then Templates | Your projects; the "Remix a
-  video" strip plays by itself), with no greeting or floating videos. The landing page follows Cardboard's flow in our
+  video" strip plays by itself), with no floating videos; the greeting is back since 3 Nov (Taibanaz, as Cardboard's:
+  "What video are we making today, <first name>?" in the serif over the prompt box, the name from Clerk). Settings
+  (Taibanaz, 3 Nov): the parts Cardboard's account settings have (its help docs: Profile, Security, Subscription,
+  Preferences), no Connectors, Brand kit or Developers: its own menu on the left, that part's cards on the right,
+  `?tab=` in the address (`app/dashboard/settings/settings-view.tsx`). Profile: display name (saved on Clerk; Home
+  greets by its first word), picture, email, deletion by email. Security: Clerk's profile (password, sign-in accounts,
+  devices), log out. Plan & billing: plan, credits, Buy credits, Credit history. Preferences (in this browser,
+  `lib/prefs.ts`): theme, the default voiceover a new video starts with, snap to the playhead on the timeline, and
+  export quality as it is (1080p, 30 fps, MP4). The landing page follows Cardboard's flow in our
   own words: hero (a serif headline that cycles "Make a launch video / from your website" and so on, prompt box,
   floating samples), Made with Hyped (masonry), Three steps (paste, direct, share), Everything a video needs (01 story,
   02 edit, 03 publish), use-case tabs, pricing, FAQ. What we don't have yet (videos from words alone, a Mac app,
@@ -98,7 +110,22 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   `/dashboard/edit/new` ("Your timeline is empty", Import media, drop, Ctrl+I): a clip imported there goes where the
   prompt box sends one (uploaded and started; demo mode, or local development when the upload fails, opens it from
   the computer). The 5-step form (`/dashboard/new`) stays, for websites, from the phones' bottom bar and Projects' empty
-  state. Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
+  state. Ask AI works in the empty editor too, before any clip (Taibanaz, 2 Nov): it only answers what's asked and never
+  acts on its own (`packages/core/src/project-chat.ts`, `/api/projects/chat`, the render Worker's
+  `ReelAssistant.projectChat`, or the root .env's key in local development without the render Worker). "Pull my video
+  from Downloads" (or a pasted path) opens the file window there at once, with no button (Taibanaz, 3 Nov; `pickAsked`
+  spots the ask, since a browser opens the picker only inside her own Enter or click, and no web page can take a file
+  from a folder without that one pick), and the Library shows the file asked for until it's chosen. The chosen clip
+  shows in the Library, then the editor opens on it with its Media tab. An edit asked for before the clip is kept
+  ("Waiting for your clip: …") and typed into the editor's Ask AI once the clip is in, for her to send (the reel's notes
+  when uploaded). Opening a file with no pick at all takes a desktop app: decided (Taibanaz, 3 Nov), planned in
+  `docs/DESKTOP_APP.md` (Electron shell around hyped.video, a read-only bridge to allowed folders; Mac first), for Syed to build.
+  Until then, local development only (Taibanaz, 3 Nov): the dev server reads the video itself (`/api/local/file`: a
+  pasted path, else the named or newest video in that folder, videos inside the home folder only, read-only, 404 in
+  production), so it comes straight into the Library with no window; Ask AI is told it was found. A video Ask AI brings
+  in waits in the Library, and a click on it opens the editor on it (Taibanaz, 3 Nov; Import media, Add and a drop
+  still open at once). Ask AI is blank until the first message, its box too: no intro, suggestions or placeholder, in
+  the empty editor and the editor alike, as Cardboard's (Taibanaz, 3 Nov). Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
 - Syed's editor spec ("Video Editor Prompt", Slack 29 Oct: a four-zone workspace, phase 1), the parts added on
   `launch/realtime-editor` (2 Nov, in PR #13): a Media tab (`media-panel.tsx`); Ask AI answers list what they
   changed with Undo this for that answer alone (`chat-steps.ts`), the box shows "At 0:12 · what's picked" and sends the

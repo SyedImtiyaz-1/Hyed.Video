@@ -2,6 +2,8 @@
 // the web app has none): through the REEL_ASSISTANT service binding in production, or the render Worker's dev routes
 // under `next dev`, like uploads.
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { parseProjectAnswer, projectChatRequest, type ProjectAnswer, type ProjectChatInput } from "@launchreel/core/project-chat";
+import { localCompletion, openaiKey } from "./local-openai";
 
 export type AssistantAnswer = { reply: string; ops: unknown[]; inputTokens: number; outputTokens: number };
 /** Stock clips for a search (checked again by the caller), or why there are none (503 not set up, 429 busy, 502 failed). */
@@ -11,6 +13,7 @@ declare global {
   interface CloudflareEnv {
     REEL_ASSISTANT?: {
       chat(input: { context: string; message: string }): Promise<AssistantAnswer>;
+      projectChat(input: ProjectChatInput): Promise<ProjectAnswer>;
       searchBroll(input: { query: string; portrait: boolean }): Promise<StockAnswer>;
     };
   }
@@ -31,6 +34,27 @@ export async function askAssistant(context: string, message: string): Promise<As
   if (process.env.NODE_ENV === "development" && process.env.DEV_RENDER_URL) return askDevRender<AssistantAnswer>("/dev/reel-chat", { context, message });
   const { env } = await getCloudflareContext({ async: true });
   return env.REEL_ASSISTANT ? env.REEL_ASSISTANT.chat({ context, message }) : null;
+}
+
+/**
+ * Ask AI in a new project, before its clip (packages/core/src/project-chat.ts), or null when there's none to ask here.
+ * Local development asks the model itself with the root .env's key when the local render Worker isn't there to ask.
+ */
+export async function askProjectAssistant(input: ProjectChatInput): Promise<ProjectAnswer | null> {
+  if (process.env.NODE_ENV === "development") {
+    const here = Boolean(openaiKey());
+    if (process.env.DEV_RENDER_URL) {
+      const answer = await askDevRender<ProjectAnswer>("/dev/project-chat", input).catch((err: unknown) => (here ? null : Promise.reject(err)));
+      if (answer) return answer;
+    }
+    if (here) {
+      const answer = parseProjectAnswer(await localCompletion(projectChatRequest(input)));
+      if (!answer) throw new Error("The assistant's answer couldn't be read.");
+      return answer;
+    }
+  }
+  const { env } = await getCloudflareContext({ async: true });
+  return env.REEL_ASSISTANT ? env.REEL_ASSISTANT.projectChat(input) : null;
 }
 
 /** Stock footage for a search (Pixabay or Pexels, for the reel's orientation), or null when there's none to ask here. */
