@@ -63,7 +63,13 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   own clips and Syed's full stack; one `SHOWCASE` line each, with `template: "reel-<style>"`).
 - Landing and dashboard, told apart as Cardboard's are (Taibanaz, 29 Oct, in PR #13): the dashboard is a clean
   workspace (prompt box, category chips that open their templates, then Templates | Your projects; the "Remix a
-  video" strip plays by itself), with no greeting or floating videos. The landing page follows Cardboard's flow in our
+  video" strip plays by itself), with no floating videos; the greeting is back since 3 Nov (Taibanaz, as Cardboard's:
+  "What video are we making today, <first name>?" in the serif over the prompt box, the name from Clerk). Settings
+  (Taibanaz, 3 Nov, from a screenshot she liked): its own menu on the left in groups (You: General, Appearance,
+  Notifications, Security; Workspace: Connectors, Brand kit, Billing, Developers, Data) and that part's cards on the
+  right, `?tab=` in the address (`app/dashboard/settings/settings-view.tsx`). Real today: the display name (saved on
+  Clerk; Home greets by its first word), theme, sign-in via Clerk's profile, log out, the GitHub token, credits,
+  deletion by email; Notifications, Brand kit and API keys say "Coming soon". The landing page follows Cardboard's flow in our
   own words: hero (a serif headline that cycles "Make a launch video / from your website" and so on, prompt box,
   floating samples), Made with Hyped (masonry), Three steps (paste, direct, share), Everything a video needs (01 story,
   02 edit, 03 publish), use-case tabs, pricing, FAQ. What we don't have yet (videos from words alone, a Mac app,
