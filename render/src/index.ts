@@ -31,6 +31,10 @@ import {
   REEL_PLAN_MODEL,
   CHAT_SCHEMA,
   CHAT_SYSTEM,
+  cleanProjectChat,
+  parseProjectAnswer,
+  projectChatRequest,
+  type ProjectAnswer,
   BROLL_SOURCES,
   parseClip,
   stockClips,
@@ -977,6 +981,27 @@ async function reelChat(env: Env, input: ReelChatInput): Promise<ReelChatResult>
   return { reply: String(parsed.reply ?? "").slice(0, 600), ops: Array.isArray(parsed.ops) ? parsed.ops : [], inputTokens: body.usage?.prompt_tokens ?? 0, outputTokens: body.usage?.completion_tokens ?? 0 };
 }
 
+/** Ask AI's answer in a new project, before it has a clip (packages/core/src/project-chat.ts), with the tokens it took. */
+type ProjectChatResult = ProjectAnswer & { inputTokens: number; outputTokens: number };
+
+/** Ask AI in a new project with no clip yet: the conversation to the plan's small model, as reelChat, with this Worker's key. */
+async function projectChat(env: Env, input: unknown): Promise<ProjectChatResult> {
+  if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set on the render Worker");
+  const clean = cleanProjectChat(input);
+  if (!clean) throw new Error("No message to answer");
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify(projectChatRequest(clean)),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) throw new Error(`The assistant failed (${res.status}): ${redactSecrets((await res.text()).slice(0, 200))}`);
+  const body = (await res.json()) as { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  const answer = parseProjectAnswer(body.choices?.[0]?.message?.content ?? "");
+  if (!answer) throw new Error("The assistant's answer couldn't be read");
+  return { ...answer, inputTokens: body.usage?.prompt_tokens ?? 0, outputTokens: body.usage?.completion_tokens ?? 0 };
+}
+
 /** Stock footage for a search: clips, or why there are none (`status`: 503 not set up, 429 the library's rate limit, 502 it failed). */
 export type BrollSearch = { clips: BrollClip[]; error?: string; status?: 429 | 502 | 503 };
 
@@ -1018,12 +1043,16 @@ async function searchBroll(env: Env, input: { query: string; portrait: boolean }
 }
 
 /**
- * The reel editor's assistant for the web app (its REEL_ASSISTANT service binding to this entrypoint): chat edits, and
- * stock B-roll searches. RPC only: no URL reaches it, so only the web Worker can ask, after it has checked who's asking.
+ * The reel editor's assistant for the web app (its REEL_ASSISTANT service binding to this entrypoint): chat edits, Ask AI
+ * in a new project before its clip, and stock B-roll searches. RPC only: no URL reaches it, so only the web Worker can
+ * ask, after it has checked who's asking.
  */
 export class ReelAssistant extends WorkerEntrypoint<Env> {
   async chat(input: ReelChatInput): Promise<ReelChatResult> {
     return reelChat(this.env, input);
+  }
+  async projectChat(input: unknown): Promise<ProjectChatResult> {
+    return projectChat(this.env, input);
   }
   async searchBroll(input: { query: string; portrait: boolean }): Promise<BrollSearch> {
     return searchBroll(this.env, input);
@@ -1033,7 +1062,8 @@ export class ReelAssistant extends WorkerEntrypoint<Env> {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // Local development only, like /dev/start: the web app's `next dev` asks for B-roll searches and chat edits here.
+    // Local development only, like /dev/start: the web app's `next dev` asks for B-roll searches and chat edits here
+    // (Ask AI before a clip too).
     if (request.method === "POST" && url.pathname === "/dev/broll-search") {
       if (!env.DEV_START_TOKEN || request.headers.get("x-dev-start-token") !== env.DEV_START_TOKEN) return new Response("Not found", { status: 404 });
       return Response.json(await searchBroll(env, (await request.json()) as { query: string; portrait: boolean }));
@@ -1042,6 +1072,14 @@ export default {
       if (!env.DEV_START_TOKEN || request.headers.get("x-dev-start-token") !== env.DEV_START_TOKEN) return new Response("Not found", { status: 404 });
       try {
         return Response.json(await reelChat(env, (await request.json()) as ReelChatInput));
+      } catch (err) {
+        return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/dev/project-chat") {
+      if (!env.DEV_START_TOKEN || request.headers.get("x-dev-start-token") !== env.DEV_START_TOKEN) return new Response("Not found", { status: 404 });
+      try {
+        return Response.json(await projectChat(env, await request.json()));
       } catch (err) {
         return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
       }

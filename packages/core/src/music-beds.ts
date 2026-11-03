@@ -28,6 +28,8 @@ export const MUSIC_DEFAULT_VOLUME = 0.5;
 export const ORIGINAL_MUSIC = "original";
 export type ReelBed = ReelMusic | typeof ORIGINAL_MUSIC;
 export const isReelBed = (v: unknown): v is ReelBed => v === ORIGINAL_MUSIC || isReelMusic(v);
+/** A bed's name as the editor shows it: a library track's, or the video's own soundtrack. */
+export const bedLabel = (track: ReelBed) => (track === ORIGINAL_MUSIC ? "Its own soundtrack" : REEL_MUSIC[track].label);
 
 /** Clean: background noise taken out of the voice. Music: a bed and its volume (0-1), or none. */
 export type ReelAudio = { clean: boolean; music: { track: ReelBed; volume: number } | null };
