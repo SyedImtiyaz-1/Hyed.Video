@@ -33,7 +33,11 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   go to `launch/caption-styles` (Taibanaz, 29 Oct). PR #11 `fix/open-dashboard-link` (a spinner on the landing page's
   dashboard buttons; Turbopack for demo mode; the template modal on phones) merged, then PR #12 merged
   `launch/caption-styles` into `main` again (29 Oct). The 29–30 Oct work below (landing vs dashboard, Editor first part A,
-  E1, the local editor) is PR #13 (2 Nov, `launch/realtime-editor` → `launch/caption-styles`), open for Syed's review.
+  E1, the local editor, the editor's full window, the sidebar) is PR #13 (`launch/realtime-editor`), merged 2 Nov; PR #14
+  merged `launch/caption-styles` into `main` the same day. The 2–3 Nov work after it (Ask AI before the clip, the
+  Library and click-to-open, blank Ask AI, `/api/local/file`, the desktop app plan, the Home greeting, Settings) is
+  PR #15 (3 Nov, `launch/ask-ai-settings` → `launch/caption-styles`), open for Syed's review; it adds
+  `ReelAssistant.projectChat` to the render Worker, so render deploys with or before web.
 - PR #6, `launch/landing-refresh` (27 Oct): a Cardboard-style landing page (full-screen hero
   with a prompt box: link + words + recipe menu + clip upload, "Auto" picks a recipe in `web/lib/prompt.ts`; floating
   sample tiles; a timeline ruler; the recipes gallery right below; then the examples strip, feature bento, pricing) and Recipes M1 (`packages/core/src/recipes.ts`, `/recipes`,
