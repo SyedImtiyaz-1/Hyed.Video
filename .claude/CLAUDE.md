@@ -10,7 +10,8 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
 
 ## Rules
 - Branch, then open a pull request to `main`. Don't push to `main`, don't deploy: Syed deploys.
-- The newest code is on `launch/caption-styles` (what's live), not `main`. Branch new work from it.
+- Since 3 Nov 2026 the newest code is on `main` (PR #16 merged into it directly); `launch/caption-styles` is behind it.
+  Branch new work from `main` unless Syed brings `launch/caption-styles` level again.
 - Test locally (`npm run dev:all`, or demo mode), never on hyped.video. Never touch production or use anyone else's login.
 - Never commit or paste secrets. `.env`, `.env.*` and `.dev.vars` stay git-ignored.
 - Containers stay keyless; the R2 video bucket stays private (only `serveMedia` serves files).
@@ -36,8 +37,22 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   E1, the local editor, the editor's full window, the sidebar) is PR #13 (`launch/realtime-editor`), merged 2 Nov; PR #14
   merged `launch/caption-styles` into `main` the same day. The 2–3 Nov work after it (Ask AI before the clip, the
   Library and click-to-open, blank Ask AI, `/api/local/file`, the desktop app plan, the Home greeting, Settings) is
-  PR #15 (3 Nov, `launch/ask-ai-settings` → `launch/caption-styles`), open for Syed's review; it adds
-  `ReelAssistant.projectChat` to the render Worker, so render deploys with or before web.
+  PR #15 (3 Nov, `launch/ask-ai-settings` → `launch/caption-styles`), merged 3 Nov, then PR #17 merged
+  `launch/caption-styles` into `main`; it adds `ReelAssistant.projectChat` to the render Worker, so render deploys
+  with or before web.
+- PR #16 `launch/templates-skills` (Syed's Mac work, 26 Oct–3 Nov; merged into `main` 3 Nov, not yet deployed): 51 caption
+  templates (`packages/core/src/caption-templates.ts`, `web/components/reels/template-gallery.tsx` in the reel form and
+  the editor's Style tab, chat op `caption_template`) on new caption engine features (lockup layout, align, key-word
+  font/caps/colour/glow, ghost words, letter spacing, box colour, Behind-you colours and casing, 11 big-word fonts) and 12
+  new OFL fonts (`runner/fonts/`, `web/components/reels/fonts/`); the effects pack (19 effects, 18 caption
+  animations) and Transitions (`transitions-panel.tsx`, a timeline track); the product video editor (captions rendered
+  after the agent, `Job.reel.video`, the "original" soundtrack, `/api/reels/[id]/prepare` for older videos); the 4:5
+  portrait format; GitHub change videos (`packages/core/src/github.ts`, `runner/src/change.ts`); App Store / Play Store
+  preview templates (goal `app`); the Hyped skills family (`runner/skills/hyped*`: core references and formats, launch /
+  update / ads / explain / dev / release / app scenarios, the `hyped-review` critic), routed in `runner/src/agent.ts`
+  behind `HYPED_SKILLS=1` (off: brag-slim stays in production until an A/B is measured); `docs/EDITOR_REDESIGN_PROMPT.md`.
+  Merged with Taibanaz's editor the same day: her layout is the base, his features sit inside it. Deploying it needs a
+  new render container image (fonts, skills) on a Cloudflare account with Workers Paid, render before web.
 - PR #6, `launch/landing-refresh` (27 Oct): a Cardboard-style landing page (full-screen hero
   with a prompt box: link + words + recipe menu + clip upload, "Auto" picks a recipe in `web/lib/prompt.ts`; floating
   sample tiles; a timeline ruler; the recipes gallery right below; then the examples strip, feature bento, pricing) and Recipes M1 (`packages/core/src/recipes.ts`, `/recipes`,
@@ -137,8 +152,8 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   keep their height, the panels and the preview take the rest, the preview sized to its column with container units;
   the same for the empty editor and the first cut's frame). Still to do from the spec: an editable name, play
   controls and a resizable height in the timeline's header, 120px track labels with icons, panel headers with search,
-  the 1024–1279px drawer and the phone layout's bottom tab bar, screenshots at three sizes. His spec names files that
-  aren't on GitHub (`transitions-panel.tsx`, `template-gallery.tsx`): his Mac work still needs pushing.
+  the 1024–1279px drawer and the phone layout's bottom tab bar, screenshots at three sizes. `transitions-panel.tsx` and
+  `template-gallery.tsx` arrived with PR #16 (3 Nov).
 
 ## Local development
 - macOS: `npm run dev:all` (database, render Worker on 8787, site on 3001). See `LOCAL_TESTING.md`.
