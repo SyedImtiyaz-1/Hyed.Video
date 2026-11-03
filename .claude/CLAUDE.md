@@ -69,11 +69,13 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   workspace (prompt box, category chips that open their templates, then Templates | Your projects; the "Remix a
   video" strip plays by itself), with no floating videos; the greeting is back since 3 Nov (Taibanaz, as Cardboard's:
   "What video are we making today, <first name>?" in the serif over the prompt box, the name from Clerk). Settings
-  (Taibanaz, 3 Nov, from a screenshot she liked): its own menu on the left in groups (You: General, Appearance,
-  Notifications, Security; Workspace: Connectors, Brand kit, Billing, Developers, Data) and that part's cards on the
-  right, `?tab=` in the address (`app/dashboard/settings/settings-view.tsx`). Real today: the display name (saved on
-  Clerk; Home greets by its first word), theme, sign-in via Clerk's profile, log out, the GitHub token, credits,
-  deletion by email; Notifications, Brand kit and API keys say "Coming soon". The landing page follows Cardboard's flow in our
+  (Taibanaz, 3 Nov): the parts Cardboard's account settings have (its help docs: Profile, Security, Subscription,
+  Preferences), no Connectors, Brand kit or Developers: its own menu on the left, that part's cards on the right,
+  `?tab=` in the address (`app/dashboard/settings/settings-view.tsx`). Profile: display name (saved on Clerk; Home
+  greets by its first word), picture, email, deletion by email. Security: Clerk's profile (password, sign-in accounts,
+  devices), log out. Plan & billing: plan, credits, Buy credits, Credit history. Preferences (in this browser,
+  `lib/prefs.ts`): theme, the default voiceover a new video starts with, snap to the playhead on the timeline, and
+  export quality as it is (1080p, 30 fps, MP4). The landing page follows Cardboard's flow in our
   own words: hero (a serif headline that cycles "Make a launch video / from your website" and so on, prompt box,
   floating samples), Made with Hyped (masonry), Three steps (paste, direct, share), Everything a video needs (01 story,
   02 edit, 03 publish), use-case tabs, pricing, FAQ. What we don't have yet (videos from words alone, a Mac app,

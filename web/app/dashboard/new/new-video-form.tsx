@@ -8,6 +8,7 @@ import type { Template } from "@launchreel/core/templates";
 import { voiceById, VOICES, type VoiceId, type VoiceOption } from "@launchreel/core/voices";
 import { cn } from "@/lib/cn";
 import { hostOf, plural } from "@/lib/format";
+import { readPrefs } from "@/lib/prefs";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -175,6 +176,11 @@ export function NewVideoForm({
   const [music, setMusic] = useState<MusicValue>(template?.music ?? "upbeat");
   const [quality, setQuality] = useState<QualityValue>("standard");
   const [voice, setVoice] = useState<VoiceId | null>(template?.voice ?? null);
+  // No voice from a template: the one picked in Settings → Preferences, once the page is in.
+  useEffect(() => {
+    const preferred = readPrefs().voice;
+    if (!template?.voice && preferred) setVoice(preferred);
+  }, [template?.voice]);
   const [captions, setCaptions] = useState(true);
   const preview = useVoicePreview();
   const [launching, setLaunching] = useState("");

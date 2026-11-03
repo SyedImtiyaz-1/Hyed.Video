@@ -13,6 +13,7 @@ import { MUSIC_DEFAULT_VOLUME } from "@launchreel/core/music-beds";
 import { applyChatOps, type ChatOp } from "@launchreel/core/reel-chat";
 import { BROLL_LENGTH, brollAt, longestShot, parseBroll, type BrollShot } from "@launchreel/core/broll";
 import { cn } from "@/lib/cn";
+import { readPrefs } from "@/lib/prefs";
 import { NEW_PROJECT } from "@/components/shell/nav";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { AudioPanel, type SoundActions } from "./audio-panel";
@@ -505,11 +506,13 @@ export function ReelEditor({
 
   // Editing on the timeline: a piece dragged (moved, or resized by an edge), a stretch of the video cut out, the picked
   // piece removed. A drag works from the edit as it was when the drag began, so the pieces' order can't shift under it,
-  // and it's one undo step. Moved pieces snap to the playhead.
+  // and it's one undo step. Moved pieces snap to the playhead, unless that's off in Settings → Preferences.
   const [timelinePick, setTimelinePick] = useState<TimelineItem | null>(null);
   const [range, setRange] = useState<[number, number] | null>(null);
   const dragBase = useRef<ReelEdit | null>(null);
-  const near = (t: number) => ms(Math.max(0, Math.min(draft.edit.duration, Math.abs(t - time) < 0.12 ? time : t)));
+  const [snap, setSnap] = useState(true);
+  useEffect(() => setSnap(readPrefs().snap), []);
+  const near = (t: number) => ms(Math.max(0, Math.min(draft.edit.duration, snap && Math.abs(t - time) < 0.12 ? time : t)));
   const dragPiece = ({ item, mode, delta }: TimelineDrag) => {
     const base = (dragBase.current ??= draft.edit);
     const group = `timeline-${JSON.stringify(item)}`;
