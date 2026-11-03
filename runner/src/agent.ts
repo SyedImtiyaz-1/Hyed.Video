@@ -1,11 +1,15 @@
-// Runs the brag-slim skill headlessly with the chosen engine and reports exact token usage.
+// Runs the video skill headlessly with the chosen engine and reports exact token usage: brag-slim, or Hyped's own
+// skills (a core and one per scenario) when HYPED_SKILLS=1.
 // Independent of the database so the cost-measurement script can reuse it.
 import type { BragRequest, Engine, MusicChoice, VideoBrief, VideoType } from "@launchreel/core/contract";
+import { FORMAT_FRAMES, type VideoFormat } from "@launchreel/core/contract";
 import { LONG_VIDEO_SECONDS, type TokenUsage } from "@launchreel/core/pricing";
 import { templateById } from "@launchreel/core/templates";
 import { voiceById } from "@launchreel/core/voices";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { CHANGE_DIFF, CHANGE_FILE, GITHUB_CHANGE, changeFiles, changeStub, describeChange, parseGithubSource } from "@launchreel/core/github";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { cloneChange } from "./change.ts";
 import { runClaude } from "./claude.ts";
 import { runCodex } from "./codex.ts";
 import { loadLibrary, pickTrack, trackBrief } from "./music.ts";
@@ -14,10 +18,29 @@ import { PROVIDER_VOICES } from "./voice-provider.ts";
 export type { BragRequest, Engine };
 
 const SKILLS_DIR = resolve(import.meta.dirname, "../skills");
+// Hyped's own skills (runner/skills/hyped*): the core, which every scenario builds on, and a skill per scenario. Off
+// until they've been measured against brag-slim: HYPED_SKILLS=1 turns them on (npm run measure, a local worker).
+const HYPED_SKILLS = ["hyped", "hyped-review", "hyped-launch", "hyped-update", "hyped-ads", "hyped-explain", "hyped-dev", "hyped-release", "hyped-app"];
+
+/** A GitHub pull request, release or comparison: a video about that change (hyped-release), not the whole project. */
+export { GITHUB_CHANGE }; // defined in @launchreel/core/github, so the web app accepts exactly the links the runner reads
+export const usesHypedSkills = () => process.env.HYPED_SKILLS === "1";
+
+/**
+ * The scenario skill for a job: a GitHub change's (a pull request or release), else its template's goal (launch,
+ * update, ads, explain, dev, app), else its video type's.
+ */
+export function scenarioSkill(req: Pick<BragRequest, "template" | "videoType"> & { source?: BragRequest["source"] }): string {
+  if (req.source && GITHUB_CHANGE.test(req.source.url)) return "hyped-release";
+  const goal = templateById(req.template)?.goal;
+  if (goal) return `hyped-${goal}`;
+  return { launch: "hyped-launch", demo: "hyped-explain", feature: "hyped-update" }[req.videoType ?? "launch"];
+}
 // Licensed music and sound effects (see runner/audio/README.md), copied into every workspace as .hyped/audio.
 const AUDIO_DIR = resolve(import.meta.dirname, "../audio");
-// The agent's scene tools, copied into every workspace as .hyped/: captions.js (burned-in captions), capture.mjs (sharp
-// page captures with every element's exact box) and camera.js (a camera, and marks pinned to those boxes).
+// The agent's scene tools, copied into every workspace as .hyped/: captions.js (word cues from the narration; the
+// captions themselves are drawn after the agent, in run-job.ts), capture.mjs (sharp page captures with every element's
+// exact box) and camera.js (a camera, and marks pinned to those boxes).
 const TOOLS_DIR = resolve(import.meta.dirname, "../tools");
 const SCENE_TOOLS = ["captions.js", "capture.mjs", "camera.js"];
 // The voiceover tool: bundled next to the runner in the container (dist/voice.mjs), run from source on a laptop.
@@ -43,23 +66,46 @@ export type RunOptions = { engine: Engine; model: string; signal?: AbortSignal; 
 /**
  * Prepare an isolated workspace: the customer's project (or an empty dir for websites) plus our skill.
  * `sourceArchive` is a private repo the render Worker already downloaded (GitHub tarball); public repos are cloned.
+ * A GitHub change (a pull request, release or comparison) is checked out at its head, and what it is goes in
+ * .hyped/change.json and .hyped/change.diff: from git and GitHub's API here for public repos, from the render Worker
+ * for private ones (`changeFacts`: the paths of the change.json and change.diff it read with the customer's token).
  */
-export function prepareWorkspace(workdir: string, req: BragRequest, run: (cmd: string, args: string[], cwd: string) => void, sourceArchive?: string) {
+export async function prepareWorkspace(
+  workdir: string,
+  req: BragRequest,
+  run: (cmd: string, args: string[], cwd: string) => void,
+  sourceArchive?: string,
+  changeFacts?: { json: string; diff: string },
+) {
   mkdirSync(workdir, { recursive: true });
   if (req.source.type === "GITHUB") {
+    const github = parseGithubSource(req.source.url);
+    let change: { json: string; diff: string } | null = null;
     if (sourceArchive) run("tar", ["-xzf", sourceArchive, "--strip-components=1"], workdir);
+    else if (github?.change) change = await cloneChange(workdir, github, req.source.url);
     else run("git", ["clone", "--depth", "1", "--single-branch", req.source.url, "."], workdir);
     // A cloned repo must not configure our agent: drop its hooks, settings, skills and agent memory files.
     for (const p of [".claude", ".agents", ".codex", ".opencode", ".hyped", "CLAUDE.md", "AGENTS.md", ".mcp.json"]) {
       rmSync(join(workdir, p), { recursive: true, force: true });
     }
+    if (github?.change) {
+      change ??= changeFacts
+        ? { json: readFileSync(changeFacts.json, "utf8"), diff: existsSync(changeFacts.diff) ? readFileSync(changeFacts.diff, "utf8") : "" }
+        : changeFiles({ ...changeStub(github, req.source.url, "archive"), notes: ["The change's description, files and diff weren't sent: only the code is here."] }, "");
+      mkdirSync(join(workdir, ".hyped"), { recursive: true });
+      writeFileSync(join(workdir, CHANGE_FILE), change.json);
+      if (change.diff) writeFileSync(join(workdir, CHANGE_DIFF), change.diff);
+    }
   } else if (req.source.type === "LOCAL") {
     cpSync(req.source.url, workdir, { recursive: true });
   }
-  // Claude Code discovers skills in .claude/skills, Codex in .agents/skills.
+  // Claude Code discovers skills in .claude/skills, Codex in .agents/skills. Hyped's skills go in together: the
+  // scenario skills read the core's files by relative path (../hyped/).
   for (const dir of [".claude/skills", ".agents/skills"]) {
     mkdirSync(join(workdir, dir), { recursive: true });
-    cpSync(join(SKILLS_DIR, "brag-slim"), join(workdir, dir, "brag-slim"), { recursive: true });
+    for (const skill of usesHypedSkills() ? HYPED_SKILLS : ["brag-slim"]) {
+      if (existsSync(join(SKILLS_DIR, skill))) cpSync(join(SKILLS_DIR, skill), join(workdir, dir, skill), { recursive: true });
+    }
   }
   if (existsSync(AUDIO_DIR)) cpSync(AUDIO_DIR, join(workdir, ".hyped", "audio"), { recursive: true });
   for (const tool of SCENE_TOOLS) {
@@ -88,6 +134,19 @@ function soundBrief(req: BragRequest): string {
   return track ? trackBrief(track) : SOUND_BRIEF[music];
 }
 
+/** "portrait (1080×1350, 4:5)": the format's name, which picks the skill's format guide, and its exact frame. */
+function formatLine(format = "landscape"): string {
+  const frame = FORMAT_FRAMES[format as VideoFormat];
+  return frame ? `${format} (${frame.width}×${frame.height}, ${frame.ratio})` : format;
+}
+
+/**
+ * The bottom share of the frame the burned-in captions take: reel.ts stands them on 78% of a 9:16 frame's height, 86%
+ * of a 4:5 one's and 90-92% of the wider ones', and two lines reach up to 70%, 77% and 80%. The format guides
+ * (runner/skills/hyped/formats) keep text out of the same band.
+ */
+const captionBand = (format: string) => (format === "vertical" ? 0.28 : format === "portrait" ? 0.24 : 0.18);
+
 /**
  * Voiceover: the agent writes the words; the voice tool records them with the customer's voice, times every word,
  * lays out the voice track and captions, and mixes. Scenes follow the voice, not the other way round.
@@ -95,7 +154,7 @@ function soundBrief(req: BragRequest): string {
 function voiceBrief(req: BragRequest): string[] {
   const voice = voiceById(req.voice);
   if (!voice) return [];
-  const format = req.format ?? "landscape";
+  const band = captionBand(req.format ?? "landscape");
   const seconds = req.durationSec ?? 20;
   const pace = PROVIDER_VOICES[voice.id].wordsPerSecond;
   // Room for a breath after each line and a moment before the first: about 80% of the video is speech.
@@ -106,12 +165,10 @@ function voiceBrief(req: BragRequest): string[] {
     `2. Save it as brag-output/work/voice/script.json ({"lines":[{"id":"01","text":"...","show":"..."}]}). "text" is spelled the way it's said ("AutoApply dot in", "seven days"); add "show" only when the captions should read differently ("autoapply.in", "7 days"). Run \`${VOICE_CLI} speak brag-output/work/voice/script.json brag-output/work/voice ${seconds}\`. It records every line, writes voice.json with each line's exact duration and word timings, and says whether the voice fits ${seconds} seconds; if it's too long, cut words and run it again (only changed lines are re-recorded).`,
     `3. Place the lines: each scene lasts its line plus a short breath (0.3-0.6 s), and the total may land within 15% of the requested duration to fit the voice. Write brag-output/work/voice/placements.json ([{"id":"01","start":0.3}, ...]: each line's start in seconds on the final timeline) and run \`${VOICE_CLI} track brag-output/work/voice/voice.json brag-output/work/voice/placements.json brag-output/work/voice <total seconds>\`. It writes voice.wav, captions.json and captions.srt, and stops with a message if lines overlap.`,
     "4. Build the scenes to the voice. Each scene starts and ends with its line's placement. Inside a scene, change what's on screen on the word that names it: load .hyped/captions.js and take times from HypedCaptions.cues(<captions.json data>), for example cues.word(\"03\", \"SQL\").start, as the comment in that file explains; camera shots and marks take their times from the same cues. Start each change 0-0.2 s before its word, never after. Every feature, number, name or screen a line mentions is visible and readable while it's said.",
-    req.captions === false
-      ? "5. The customer turned burned-in captions off: don't draw captions on the video (captions.srt is still delivered)."
-      : `5. Burn in captions: in the same pages, on every frame, call render(t) on HypedCaptions.create(<captions.json data>, { accent: <the brand's accent colour>, format: "${format}" }), with t on the final timeline. Keep other text out of the caption area at the bottom: in scenes that use .hyped/camera.js, pass inset: { bottom: ${format === "vertical" ? 0.28 : 0.18} } so the camera frames its targets above the captions.`,
+    `5. Captions: don't draw any. ${req.captions === false ? "The customer turned them off for now (captions.srt is still delivered), and can turn them on later." : "They're added after you render, from captions.json, word by word at the bottom of the frame."} Keep other text out of the bottom ${Math.round(band * 100)}% of the frame, where they go: in scenes that use .hyped/camera.js, pass inset: { bottom: ${band} } so the camera frames its targets above them. Write the brand's accent colour (the one your scenes highlight with) to brag-output/work/brand.json as {"accent":"#RRGGBB"}: the captions show the spoken word in it.`,
     `6. Mix: build the music bed as usual (with any sound effects in it), then run \`${VOICE_CLI} mix brag-output/work/voice/voice.wav <music bed file, or none> <total seconds> brag-output/work/mix.m4a\`. It ducks the music under the voice and masters to -14 LUFS; use mix.m4a as the video's audio.`,
     "7. Copy brag-output/work/voice/captions.srt to brag-output/captions.srt. The narration carries the story now: keep on-screen text to short labels, and don't repeat each spoken line word for word in big type.",
-    `8. Sync check (required, after rendering brag-output/brag.mp4): run \`${VOICE_CLI} frames brag-output/brag.mp4 brag-output/work/voice/captions.json brag-output/work/voice/check\` and look at the check.jpg it makes. In every still, what the line names is on screen and readable, and the on-screen words agree with the line; in the last still, the web address or call to action is on screen. Fix any scene that fails, render again, and rerun the check until every still passes.`,
+    `8. Sync check (required, after rendering brag-output/brag.mp4): run \`${VOICE_CLI} frames brag-output/brag.mp4 brag-output/work/voice/captions.json brag-output/work/voice/check\` and look at the check.jpg it makes. In every still, what the line names is on screen and readable, and the on-screen words agree with the line; in the last still, the web address or call to action is on screen. ${usesHypedSkills() ? "Run it as part of the hyped-review skill: fix what fails within its fix rounds." : "Fix any scene that fails, render again, and rerun the check until every still passes."}`,
   ];
 }
 
@@ -142,8 +199,10 @@ function briefLines(brief?: VideoBrief | null): string[] {
 const LONG_VIDEO_BRIEF = [
   "This is a full launch video for a homepage, not a short teaser. Use the requested duration instead of the skill's 15-25 second guidance; every other craft rule still applies.",
   "Structure: a hook in the first 3-5 seconds, the problem, the product reveal, 3-5 key features each shown with the product's real UI or code, one memorable proof point or detail, then a call to action with the URL.",
-  "Keep it moving: no scene longer than about 8 seconds, and a clear visual change at least every 3 seconds. There is no voiceover, so readable on-screen text carries the story.",
+  "Keep it moving: no scene longer than about 8 seconds, and a clear visual change at least every 3 seconds.",
 ];
+/** Without a voiceover, a long video's story is told on screen. */
+const SILENT_LONG_VIDEO = "There is no voiceover, so readable on-screen text carries the story.";
 
 /**
  * The craft floor for every video, new or revised. The skill allows "whatever works on this machine", and a model that
@@ -164,25 +223,37 @@ const CRAFT_RULES = [
   "Before the full render, check a still from the middle of every scene. If a scene is static, uses a fallback font, stacks text on text, shows the product small in an empty frame, or has a ring, cursor or label off its element, fix it first.",
 ];
 
-/** The same brief for both engines; only the skill invocation syntax differs (/skill vs $skill). */
+/**
+ * The same brief for both engines; only the skill invocation syntax differs (/skill vs $skill). Hyped's skills carry the
+ * craft rules and the long-video structure themselves, so with them the prompt is only the job.
+ */
 export function buildPrompt(req: BragRequest, engine: Engine): string {
-  const skill = engine === "claude" ? "/brag-slim" : "$brag-slim";
-  const target = req.source.type === "WEBSITE" ? `the website ${req.source.url}` : "the project in the current directory";
+  const hyped = usesHypedSkills();
+  const skill = `${engine === "claude" ? "/" : "$"}${hyped ? scenarioSkill(req) : "brag-slim"}`;
+  const github = req.source.type === "GITHUB" ? parseGithubSource(req.source.url) : null;
+  const target =
+    req.source.type === "WEBSITE"
+      ? `the website ${req.source.url}`
+      : github?.change
+        ? `${describeChange(github)} (${req.source.url}), checked out in the current directory at the change's head. What the change is (its title, description, author, dates, files and commits) is in ${CHANGE_FILE} and its diff in ${CHANGE_DIFF}. Make the video about this change, not the whole project.`
+        : "the project in the current directory";
   const lines = req.revisionOf
     ? [
         `An earlier ${skill} run left its plan and work files in brag-output/. Revise that video: ${req.revisionOf}`,
         "Keep everything the request doesn't mention. Re-render brag-output/brag.mp4, brag.jpg and share-copy.txt in place.",
         "The licensed music and sound-effects library is in .hyped/audio (see its README.md) if the change involves sound.",
         voiceById(req.voice)
-          ? `This video has a voiceover. If the change affects what's said, update brag-output/work/voice/script.json (keep "show" for words the captions spell differently) and re-run \`${VOICE_CLI} speak\`, \`track\` and \`mix\` as before (unchanged lines aren't re-recorded). Keep every scene showing what its line says, copy the new captions.srt to brag-output/captions.srt, and finish with \`${VOICE_CLI} frames brag-output/brag.mp4 brag-output/work/voice/captions.json brag-output/work/voice/check\`: fix any still where the screen doesn't match its line.`
+          ? `This video has a voiceover. If the change affects what's said, update brag-output/work/voice/script.json (keep "show" for words the captions spell differently) and re-run \`${VOICE_CLI} speak\`, \`track\` and \`mix\` as before (unchanged lines aren't re-recorded). Keep every scene showing what its line says, copy the new captions.srt to brag-output/captions.srt, and finish with \`${VOICE_CLI} frames brag-output/brag.mp4 brag-output/work/voice/captions.json brag-output/work/voice/check\`: fix any still where the screen doesn't match its line. Captions are added after you render, so don't draw any (HypedCaptions' render now draws nothing), and if brag-output/work/brand.json is missing, write the brand's accent colour there as {"accent":"#RRGGBB"}.`
           : "",
       ]
     : [
         `${skill} ${target}`,
-        VIDEO_TYPE_BRIEF[req.videoType ?? "launch"],
+        // With Hyped's skills, a template's scenario skill and beats say what kind of video it is (the type line would call
+        // Social Proof a launch announcement).
+        hyped && templateById(req.template) ? "" : VIDEO_TYPE_BRIEF[req.videoType ?? "launch"],
         req.tone ? `Tone: ${req.tone}` : "",
-        `Format: ${req.format ?? "landscape"}. Duration: about ${req.durationSec ?? 20}s.`,
-        ...((req.durationSec ?? 20) > LONG_VIDEO_SECONDS ? LONG_VIDEO_BRIEF : []),
+        `Format: ${formatLine(req.format)}. Duration: about ${req.durationSec ?? 20}s.`,
+        ...(!hyped && (req.durationSec ?? 20) > LONG_VIDEO_SECONDS ? [...LONG_VIDEO_BRIEF, ...(voiceById(req.voice) ? [] : [SILENT_LONG_VIDEO])] : []),
         ...templateBrief(req),
         ...briefLines(req.brief),
         req.notes ? `Direction from the customer: ${req.notes}` : "",
@@ -191,7 +262,7 @@ export function buildPrompt(req: BragRequest, engine: Engine): string {
       ];
   return [
     ...lines,
-    ...CRAFT_RULES,
+    ...(hyped ? [] : CRAFT_RULES),
     "",
     "You are running as an unattended job in a render server. Nobody can answer questions: make the sensible choice and keep going.",
     "Every command must finish within a few minutes. Run servers and watchers in the background and stop them when done. When loading pages in a browser, use waitUntil 'load' plus a short fixed wait, never 'networkidle' (live sites keep connections open). If a step keeps failing or stalls, simplify it instead of retrying the same thing.",

@@ -1,15 +1,14 @@
 "use client";
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { CAPTION_OFFSET, captionPlace, captionY, lineAtTime, type CaptionLine as Line, type CaptionLook, type ReelStyle } from "@launchreel/core/captions";
-import { EMOJI_SIZE, type ReelEdit, type ReelFont } from "@launchreel/core/reel";
+import { bigWords, bigWordText, EMOJI_SIZE, type ReelEdit, type ReelFont } from "@launchreel/core/reel";
 import { emojiShows, HOOK_END, HOOK_START } from "@launchreel/core/timeline";
-import { strongestWord } from "@launchreel/core/words";
 import { cn } from "@/lib/cn";
-import { CaptionLine } from "./caption-preview";
-import { BIG_SAMPLES } from "./font-picker";
+import { CaptionLine, FRAME_9_16, sizeUnit, type Aspect } from "./caption-preview";
+import { bigWordLook } from "./font-picker";
 
-/** The parts of the reel's options the preview draws. */
-export type PreviewOptions = { style: ReelStyle; fonts: ReelFont[]; emojis: boolean; zooms: boolean; hook: boolean };
+/** The parts of the reel's options the preview draws (captions false: none drawn, as a product video can turn them off). */
+export type PreviewOptions = { style: ReelStyle; fonts: ReelFont[]; emojis: boolean; zooms: boolean; hook: boolean; captions?: boolean };
 
 /** The line on screen at `time`, if any, and its index. */
 export function lineAt(lines: Line[], time: number) {
@@ -33,6 +32,7 @@ export function LiveCaptions({
   onHook,
   onMove,
   selected = null,
+  aspect = FRAME_9_16,
 }: {
   look: CaptionLook;
   options: PreviewOptions;
@@ -43,12 +43,18 @@ export function LiveCaptions({
   onHook?: () => void;
   onMove?: (offset: number, done: boolean) => void;
   selected?: number | null;
+  /** The frame's shape (sizes and places follow it, as in the render). */
+  aspect?: Aspect;
 }) {
+  const unit = sizeUnit(aspect);
+  // An ASS size (a share of sqrt(width × height)) as a share of the height: 0.75 on 9:16.
+  const ofHeight = Math.sqrt(aspect.width / aspect.height);
   const behind = options.style === "behind";
   const hookOn = options.hook && Boolean(edit.hook) && time >= HOOK_START && time < HOOK_END;
   const current = lineAt(lines, time);
   const keywords = new Set(edit.keywords);
-  // How many lines the caption breaks into (CaptionLine measures it), for the emoji beside it.
+  // How tall the caption is, in lines at the look's size (CaptionLine measures it: 1 or 2 lines, or a lockup's
+  // height), for the emoji beside it.
   const [rows, setRows] = useState(1);
 
   // Dragging the captions: past a few pixels it's a drag (the click on a word is dropped), else a click.
@@ -94,17 +100,18 @@ export function LiveCaptions({
     : {};
 
   let caption = null;
-  let big: { text: string; font: ReelFont; word: number } | null = null;
-  if (current && !(behind && hookOn)) {
+  let big: { text: string; font: ReelFont; turn: number; word: number } | null = null;
+  if (current && !(behind && hookOn) && options.captions !== false) {
     const { index, line } = current;
     const texts = line.words.map((w) => w.text);
     const spoken = line.words.reduce((last, w, k) => (w.start <= time ? k : last), -1);
     const local = selected === null ? null : line.words.findIndex((w) => w.i === selected);
     if (behind) {
-      // The line's big word (its first highlight, else its strongest), from when it's said; the rest stays small.
-      const marked = line.words.findIndex((w) => keywords.has(w.i));
-      const hero = marked >= 0 ? marked : strongestWord(line.words);
-      if (hero !== null && spoken >= hero) big = { text: texts[hero], font: options.fonts[(index + (options.hook && edit.hook ? 1 : 0)) % options.fonts.length], word: line.words[hero].i };
+      // The line's big word as the render picks and times it (bigWords: its first highlight, else its strongest), in
+      // the font and colour of its turn; the rest stays small. A line the render gives no big word stays whole.
+      const shot = bigWords(lines, keywords, options.hook && edit.hook ? HOOK_END : null).find((s) => s.line === index);
+      const hero = shot ? shot.word : null;
+      if (shot && time >= shot.start && time < shot.end) big = { text: texts[shot.word], font: options.fonts[shot.turn % options.fonts.length], turn: shot.turn, word: line.words[shot.word].i };
       const rest = texts.map((_, k) => k).filter((k) => k !== hero);
       if (rest.length)
         caption = (
@@ -119,6 +126,7 @@ export function LiveCaptions({
             onWord={onWord && ((k) => onWord(line.words[rest[k]].i))}
             selected={local === null || local < 0 ? null : rest.indexOf(local)}
             onRows={setRows}
+            aspect={aspect}
           />
         );
     } else {
@@ -134,27 +142,30 @@ export function LiveCaptions({
           onWord={onWord && ((k) => onWord(line.words[k].i))}
           selected={local === null || local < 0 ? null : local}
           onRows={setRows}
+          aspect={aspect}
         />
       );
     }
   }
 
   // The emoji showing, sized and placed as the render does: above the caption (or below it), 8.6% of the height tall
-  // at medium. Heights are shares of the frame's height; a caption line is look.size × 0.75 of it on 9:16.
+  // at medium on 9:16. Heights are shares of the frame's height; a caption line is look.size × 0.75 of it on 9:16.
   const show = options.emojis && !behind ? emojiShows(edit, lines).find((s) => time >= s.start && time < s.end) : undefined;
   let emoji: { char: string; style: CSSProperties; word: number } | null = null;
   if (show) {
-    const size = EMOJI_SIZE[edit.emojiStyle.size] * 0.75;
-    const y = captionY(9, 16, look);
-    const block = look.size * 0.75 * (show.line === current?.index ? rows : 1);
+    const size = EMOJI_SIZE[edit.emojiStyle.size] * ofHeight;
+    const y = captionY(aspect.width, aspect.height, look);
+    const block = look.size * ofHeight * (show.line === current?.index && caption ? rows : 1);
     const anchorTop = look.position !== "bottom";
     const below = edit.emojiStyle.place === "below" || (edit.emojiStyle.place === "auto" && look.position === "top");
     const top = below ? (anchorTop ? y + block + 0.015 : y + 0.015) : anchorTop ? y - 0.012 - size : y - block - 0.01 - size;
-    emoji = { char: show.emoji, word: show.word, style: { top: `${(Math.min(1 - size, Math.max(0, top)) * 100).toFixed(2)}%`, height: `${(size * 100).toFixed(2)}%`, fontSize: `${(EMOJI_SIZE[edit.emojiStyle.size] * 133.33 * 0.86).toFixed(2)}cqw` } };
+    emoji = { char: show.emoji, word: show.word, style: { top: `${(Math.min(1 - size, Math.max(0, top)) * 100).toFixed(2)}%`, height: `${(size * 100).toFixed(2)}%`, fontSize: `${(EMOJI_SIZE[edit.emojiStyle.size] * unit * 0.86).toFixed(2)}cqw` } };
   }
 
-  const hookTop = look.position === "top" ? captionPlace(9, 16, "middle") * 0.9 : 0.15;
-  const bigSample = big ? BIG_SAMPLES[big.font] : null;
+  const hookTop = look.position === "top" ? captionPlace(aspect.width, aspect.height, "middle") * 0.9 : 0.15;
+  // "Behind you"'s hook is turn 0 (the first font and colour); each big word its own turn.
+  const hookBig = hookOn && behind ? bigWordLook(options.fonts[0], 0, look) : null;
+  const bigSample = big ? bigWordLook(big.font, big.turn, look) : null;
   // Clickable text on the video: a button for screen readers and keyboards, outlined on hover.
   const editable = (onClick: (() => void) | undefined, label: string) =>
     onClick
@@ -180,14 +191,18 @@ export function LiveCaptions({
     <span ref={frame} className="pointer-events-none absolute inset-0 [container-type:inline-size]" aria-hidden={onWord ? undefined : true}>
       {hookOn && !behind && (
         <span className="absolute inset-x-0 flex justify-center" style={{ top: `${hookTop * 100}%` }}>
-          <span {...editable(onHook, "Edit the hook title")} className={cn("max-w-[80%] rotate-[-1.5deg] rounded-[0.2em] bg-[#FFD60A] px-[0.22em] py-[0.08em] text-center font-black uppercase leading-[1.1] text-[#0A0A0A]", onHook && hoverable)} style={{ fontSize: "6.2cqw" }}>
+          <span {...editable(onHook, "Edit the hook title")} className={cn("max-w-[80%] rotate-[-1.5deg] rounded-[0.2em] bg-[#FFD60A] px-[0.22em] py-[0.08em] text-center font-black uppercase leading-[1.1] text-[#0A0A0A]", onHook && hoverable)} style={{ fontSize: `${((6.2 * unit) / 133.33).toFixed(2)}cqw` }}>
             {edit.hook}
           </span>
         </span>
       )}
-      {hookOn && behind && (
-        <span {...editable(onHook, "Edit the hook title")} className={cn("absolute inset-x-[6%] top-[19%] text-center leading-[0.95]", BIG_SAMPLES[options.fonts[0]].className, onHook && hoverable)} style={{ ...BIG_SAMPLES[options.fonts[0]].style, fontSize: "11cqw", textShadow: "0 0.6cqw 2.5cqw rgb(0 0 0 / 0.45)" }}>
-          {BIG_SAMPLES[options.fonts[0]].word === BIG_SAMPLES[options.fonts[0]].word.toUpperCase() ? edit.hook.toUpperCase() : edit.hook}
+      {hookBig && (
+        <span {...editable(onHook, "Edit the hook title")} className={cn("absolute inset-x-[6%] top-[19%] text-center leading-[0.95]", hookBig.className, onHook && hoverable)} style={{ ...hookBig.style, fontSize: "11cqw", textShadow: "0 0.6cqw 2.5cqw rgb(0 0 0 / 0.45)" }}>
+          {edit.hook
+            .split(" ")
+            .map((w) => bigWordText(w, hookBig.casing))
+            .filter(Boolean)
+            .join(" ")}
         </span>
       )}
       {big && bigSample && (
@@ -197,7 +212,7 @@ export function LiveCaptions({
           className={cn("absolute inset-x-[4%] top-[21%] truncate text-center leading-none", bigSample.className, onWord && hoverable, selected === big.word && "outline outline-2 outline-offset-2 outline-white")}
           style={{ ...bigSample.style, fontSize: `${Math.min(19, 150 / Math.max(4, big.text.length))}cqw`, textShadow: "0 0.6cqw 2.5cqw rgb(0 0 0 / 0.45)", animation: "reel-fade 0.1s ease-out" }}
         >
-          {bigSample.word === bigSample.word.toUpperCase() ? big.text.toUpperCase() : bigSample.word === bigSample.word.toLowerCase() ? big.text.toLowerCase() : big.text.charAt(0).toUpperCase() + big.text.slice(1)}
+          {bigWordText(big.text, bigSample.casing)}
         </span>
       )}
       {caption && (

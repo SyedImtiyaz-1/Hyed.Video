@@ -23,6 +23,7 @@ const SIZES: { value: Recipe["format"]; label: string }[] = [
   { value: "landscape", label: `${RATIO.landscape} Landscape` },
   { value: "vertical", label: `${RATIO.vertical} Vertical` },
   { value: "square", label: `${RATIO.square} Square` },
+  { value: "portrait", label: `${RATIO.portrait} Portrait` },
 ];
 
 /**

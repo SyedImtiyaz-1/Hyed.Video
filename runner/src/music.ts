@@ -43,6 +43,8 @@ const TEMPLATE_MOODS: Record<string, Mood[]> = {
   "founder-demo": ["corporate", "calm"],
   "social-proof": ["corporate", "energetic"],
   "readme-loop": ["chill", "tech"],
+  "app-store-preview": ["playful", "energetic"],
+  "play-store-promo": ["energetic", "playful"],
 };
 
 const TYPE_MOODS: Record<string, Mood[]> = {

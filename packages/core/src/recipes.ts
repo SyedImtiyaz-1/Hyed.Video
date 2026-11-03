@@ -10,7 +10,7 @@ import type { VoiceId } from "./voices";
 /** Which pipeline makes it: a product video by the agent, or a reel from the customer's own clip. */
 export type RecipeKind = "video" | "reel";
 
-export type RecipeCategory = "launch" | "product" | "talking-head" | "vlog" | "clipping" | "aftermovie" | "updates" | "ads" | "dev";
+export type RecipeCategory = "launch" | "product" | "talking-head" | "vlog" | "clipping" | "aftermovie" | "updates" | "ads" | "apps" | "dev";
 
 /** The gallery's categories, in its order. */
 export const RECIPE_CATEGORIES: { value: RecipeCategory; label: string }[] = [
@@ -22,6 +22,7 @@ export const RECIPE_CATEGORIES: { value: RecipeCategory; label: string }[] = [
   { value: "aftermovie", label: "Aftermovie" },
   { value: "updates", label: "Updates" },
   { value: "ads", label: "Ads" },
+  { value: "apps", label: "Apps" },
   { value: "dev", label: "Developers" },
 ];
 
@@ -65,12 +66,13 @@ export type Recipe = {
 };
 
 // Today's template goals, as gallery categories.
-const CATEGORY: Record<TemplateGoal, RecipeCategory> = { launch: "launch", update: "updates", ads: "ads", explain: "product", dev: "dev" };
+const CATEGORY: Record<TemplateGoal, RecipeCategory> = { launch: "launch", update: "updates", ads: "ads", explain: "product", dev: "dev", app: "apps" };
 
 /** Every product video starts from a website or a repo. */
 const SOURCE: RecipeInput = { id: "source", type: "source", label: "Your website or GitHub repo", accept: ["website", "github"] };
 
-/** A template as a recipe: a Standard product video from a website or repo, in any shape, 15 to 90 seconds. */
+/** A template as a recipe: a Standard product video from a website or repo, in any shape, 15 to 90 seconds (or the
+ * template's own shapes and lengths, where an app store sets them). */
 function fromTemplate(t: Template): Recipe {
   return {
     id: t.id,
@@ -80,9 +82,9 @@ function fromTemplate(t: Template): Recipe {
     kind: "video",
     tier: "standard",
     format: t.format,
-    formats: ["landscape", "vertical", "square"],
+    formats: t.formats ?? ["landscape", "vertical", "square", "portrait"],
     durationSec: t.durationSec,
-    durations: [15, 90],
+    durations: t.durations ?? [15, 90],
     platforms: t.platforms,
     inputs: [SOURCE],
     status: "live",

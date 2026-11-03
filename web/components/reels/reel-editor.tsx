@@ -2,16 +2,18 @@
 import { ArrowLeft, Check, LoaderCircle, Pause, Play, Redo2, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { captionLines, cueOf, lineOfWord, resolveLook, type ReelLookChanges, type ReelStyle } from "@launchreel/core/captions";
+import { matchingTemplate } from "@launchreel/core/caption-templates";
+import { captionLines, cueOf, lineOfWord, REEL_STYLES, resolveLook, type ReelLookChanges, type ReelStyle } from "@launchreel/core/captions";
 import { EFFECTS, effectsAt, type PlacedEffect } from "@launchreel/core/effects";
 import type { ReelPicture } from "@launchreel/core/picture";
-import type { EmojiStyle, ReelEdit, ReelExport, ReelFont, ZoomStrength } from "@launchreel/core/reel";
+import type { EmojiStyle, ReelEdit, ReelExport, ReelFont, VideoSource, ZoomStrength } from "@launchreel/core/reel";
 import type { ReelSound } from "@launchreel/core/sounds";
 import { punchAt, soundCues, zoomAim, zoomWindows } from "@launchreel/core/timeline";
 import { cutClock, onCutTimeline, parseTrims, pauseTrims, trimAt, trimmedWords, wordsTrim, type Trim } from "@launchreel/core/trims";
-import { MUSIC_DEFAULT_VOLUME } from "@launchreel/core/music-beds";
+import { libraryBed, MUSIC_DEFAULT_VOLUME, ORIGINAL_MUSIC } from "@launchreel/core/music-beds";
 import { applyChatOps, type ChatOp } from "@launchreel/core/reel-chat";
 import { BROLL_LENGTH, brollAt, longestShot, parseBroll, type BrollShot } from "@launchreel/core/broll";
+import { parseTransitions, type PlacedTransition, transitionDirs, transitionEffects, transitionJoints, type TransitionKind, transitionPlaces, TRANSITIONS, withTrims } from "@launchreel/core/transitions";
 import { cn } from "@/lib/cn";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { AudioPanel, type SoundActions } from "./audio-panel";
@@ -27,16 +29,22 @@ import { LiveCaptions, lineAt } from "./live-captions";
 import { LookEditor } from "./look-editor";
 import { PictureLayers, useVideoFilter, viewTransform } from "./picture-layers";
 import { ReelTimeline, type TimelineItem } from "./reel-timeline";
-import { CuePlayer, MusicPlayer, preloadSounds } from "./sfx-player";
+import { CuePlayer, MusicPlayer, preloadSounds, TrackPlayer } from "./sfx-player";
 import { StylePicker } from "./style-picker";
+import { TemplateGallery } from "./template-gallery";
+import { TransitionLayers } from "./transition-layers";
+import { TransitionsPanel, type TransitionActions } from "./transitions-panel";
 import { soundOfWord, TranscriptEditor, WordPanel, type WordActions } from "./transcript-editor";
 
-/** What the editor changes besides the edit itself: the style and its look, the big words' fonts, and the extras. */
-export type EditorOptions = { style: ReelStyle; look: ReelLookChanges; fonts: ReelFont[]; emojis: boolean; zooms: boolean; sfx: boolean; hook: boolean };
+/**
+ * What the editor changes besides the edit itself: the style and its look, the big words' fonts, the extras, and (for
+ * a product video, which can turn them off) whether there are captions at all.
+ */
+export type EditorOptions = { style: ReelStyle; look: ReelLookChanges; fonts: ReelFont[]; emojis: boolean; zooms: boolean; sfx: boolean; hook: boolean; captions?: boolean };
 type Draft = { options: EditorOptions; edit: ReelEdit };
 type History = { past: Draft[]; present: Draft; future: Draft[]; group?: string; at?: number };
 
-const TABS = ["Ask AI", "Style", "Text", "Cuts", "B-roll", "Emojis", "Effects", "Filters", "Audio"] as const;
+const TABS = ["Ask AI", "Style", "Text", "Cuts", "Transitions", "B-roll", "Emojis", "Effects", "Filters", "Audio"] as const;
 type Tab = (typeof TABS)[number];
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const same = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
@@ -46,6 +54,10 @@ const ms = (t: number) => Math.round(t * 1000) / 1000;
  * The reel editor: the reel's clean preview with everything drawn live as the render will make it (captions, emojis,
  * punch-ins, transitions and effects, the filter and overlays, and the sound effects), a timeline, and panels for every
  * change. Words can be edited right on the video. Export renders it again (free while the upload is kept).
+ *
+ * A product video (`video`) opens here too, in its own shape: its words are its narration's (none without one), its
+ * captions can be turned off, there's no "Behind you" or pause cutting, and its own soundtrack plays unless the music
+ * is changed (then its narration alone plays, from `voiceUrl`, under the new bed).
  *
  * Two clocks: the edit, the panels and the timeline are on the recording's clock (`time`, the preview video's own),
  * where cut stretches still exist and can be put back; what's drawn on the preview is the edit on the cut video's clock
@@ -60,6 +72,8 @@ export function ReelEditor({
   initialExport,
   editableUntil,
   startAt,
+  video: product = null,
+  voiceUrl,
 }: {
   jobId: string;
   name: string;
@@ -67,7 +81,10 @@ export function ReelEditor({
   edit: ReelEdit;
   previewUrl: string;
   initialExport: ReelExport | null;
-  editableUntil: string;
+  /** When free exports end (a reel's upload is kept REEL_EDIT_DAYS); null for a product video, which keeps its own. */
+  editableUntil: string | null;
+  video?: VideoSource | null;
+  voiceUrl?: string;
   /** Opened from the reel's page at this second: the editor starts there, with that moment's caption open to edit. */
   startAt?: number;
 }) {
@@ -75,10 +92,16 @@ export function ReelEditor({
   const [history, setHistory] = useState<History>({ past: [], present: { options, edit }, future: [] });
   const [exported, setExported] = useState<Draft>({ options, edit });
   const draft = history.present;
-  const [tab, setTab] = useState<Tab>("Style");
+  const noun = product ? "video" : "reel";
+  // A product video without a narration has no words: nothing to caption, cut or put emojis on.
+  const wordless = draft.edit.words.length === 0;
+  const tabs = TABS.filter((t) => !(wordless && (t === "Style" || t === "Text" || t === "Cuts" || t === "Emojis")));
+  const [tab, setTab] = useState<Tab>(wordless ? "Ask AI" : "Style");
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTrim, setSelectedTrim] = useState<number | null>(null);
   const [selectedShot, setSelectedShot] = useState<number | null>(null);
+  // The place picked in the Transitions tab (upload clock); the one nearest the playhead until one is.
+  const [selectedPlace, setSelectedPlace] = useState<number | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
   const [exportState, setExportState] = useState<ReelExport | null>(initialExport);
@@ -149,6 +172,10 @@ export function ReelEditor({
     });
   }, [draft.edit.broll, view, cutAt]);
   const brollSpans = useMemo(() => brollRows.flatMap((r, index) => (r.at === null ? [] : [{ index, start: cutAt.toUpload(r.at), end: cutAt.toUpload(r.at + r.length), query: r.shot.query }])), [brollRows, cutAt]);
+  // Transitions: where they can go (upload clock), where each plays (cut clock), and the effects some bring along.
+  const places = useMemo(() => transitionPlaces(draft.edit), [draft.edit]);
+  const joints = useMemo(() => transitionJoints(draft.edit), [draft.edit]);
+  const viewEffects = useMemo(() => (joints.length ? [...view.effects, ...transitionEffects(joints)].sort((a, b) => a.at - b.at) : view.effects), [view.effects, joints]);
   const hookShown = draft.options.hook && Boolean(draft.edit.hook);
   const cues = useMemo(() => (draft.options.sfx ? soundCues(view, hookShown) : []), [view, draft.options.sfx, hookShown]);
   const sounds = useRef(new CuePlayer());
@@ -157,7 +184,11 @@ export function ReelEditor({
   // The music bed, on the cut clock, dipping while a word is being said (with a moment after it, as the render's release).
   const music = useRef(new MusicPlayer());
   const speech = useMemo(() => view.words.filter((_, i) => !view.hidden.includes(i)).map((w) => [w.start - 0.05, w.end + 0.3] as const), [view]);
-  music.current.music = view.audio.music;
+  music.current.music = libraryBed(view.audio.music);
+  // A product video plays its own soundtrack in the preview; with the music changed, its narration alone instead.
+  const ownSound = !product || view.audio.music?.track === ORIGINAL_MUSIC;
+  const narration = useRef(new TrackPlayer());
+  narration.current.url = !ownSound && product?.voice && voiceUrl ? voiceUrl : null;
   music.current.speaking = (t) => {
     let lo = 0;
     let hi = speech.length - 1;
@@ -189,6 +220,7 @@ export function ReelEditor({
         setTime(v.currentTime);
         sounds.current.tick(at.toCut(v.currentTime), !v.paused);
         music.current.tick(at.toCut(v.currentTime), !v.paused);
+        narration.current.tick(v.currentTime, !v.paused);
       }
       frame = requestAnimationFrame(tick);
     };
@@ -197,6 +229,7 @@ export function ReelEditor({
       cancelAnimationFrame(frame);
       sounds.current.reset();
       music.current.reset();
+      narration.current.reset();
     };
   }, [playing]);
   const seek = (t: number) => {
@@ -204,6 +237,7 @@ export function ReelEditor({
     if (video.current) video.current.currentTime = clamped;
     sounds.current.reset();
     music.current.reset();
+    narration.current.reset();
     setTime(clamped);
   };
   const toggle = () => {
@@ -224,7 +258,14 @@ export function ReelEditor({
     return () => resize.disconnect();
   }, []);
   const viewTime = cutAt.toCut(time);
-  const fx = effectsAt(view.effects, viewTime);
+  // The frame's shape (a product video can be landscape or square): the preview, its column and its controls follow it.
+  const aspect = { width: draft.edit.width, height: draft.edit.height };
+  const shape = aspect.height > aspect.width * 1.15 ? "tall" : aspect.width > aspect.height * 1.15 ? "wide" : "square";
+  const frameSize = { tall: "max-w-[240px] sm:max-w-[300px] lg:max-w-[340px]", square: "max-w-[360px] lg:max-w-[440px]", wide: "max-w-[640px]" }[shape];
+  const barWidth = { tall: "max-w-[300px] lg:max-w-[340px]", square: "max-w-[360px] lg:max-w-[440px]", wide: "max-w-[640px]" }[shape];
+  const columns = { tall: "lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]", square: "lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]", wide: "lg:grid-cols-[minmax(0,560px)_minmax(0,1fr)]" }[shape];
+  const captionsShown = draft.options.captions !== false && !wordless;
+  const fx = effectsAt(viewEffects, viewTime);
   const zoom = 1 + (draft.options.zooms ? punchAt(viewWindows, viewTime) : 0) + fx.zoom;
   const inTrim = trimAt(trims, time);
   const { filter, svg } = useVideoFilter(draft.edit.picture, fx, frameWidth);
@@ -288,8 +329,10 @@ export function ReelEditor({
       }),
   };
 
-  // Cuts: every change goes through parseTrims, which keeps them in order, merged, on whole frames.
-  const setTrims = (change: (trims: Trim[], e: ReelEdit) => Trim[]) => setEdit((e) => ({ ...e, trims: parseTrims(change(e.trims, e), e.duration) }));
+  // Cuts: every change goes through parseTrims, which keeps them in order, merged, on whole frames. A transition on a
+  // jump cut follows it: to its new end when it grows past it (a word next to it cut too), or away, with its sound, when
+  // the cut is put back (no cut there any more).
+  const setTrims = (change: (trims: Trim[], e: ReelEdit) => Trim[]) => setEdit((e) => withTrims(e, parseTrims(change(e.trims, e), e.duration)));
   const trimActions: TrimActions = {
     restore: (index) => setTrims((t) => t.filter((_, i) => i !== index)),
     restoreAll: (reason) => setTrims((t) => (reason ? t.filter((x) => x.reason !== reason) : [])),
@@ -334,6 +377,67 @@ export function ReelEditor({
         return { ...e, effects: e.effects.filter((_, k) => k !== index), sounds: e.sounds.filter((_, k) => k !== paired) };
       }),
     seek,
+  };
+  // Transitions come with their sound too (on the upload clock, at the place), and take it along when they go.
+  const pairedTransitionSound = (sounds: ReelEdit["sounds"], t: PlacedTransition) => {
+    const sound = TRANSITIONS[t.kind].sound;
+    return sound ? sounds.findIndex((s) => Math.abs(s.at - t.at) < 0.001 && s.sound === sound) : -1;
+  };
+  /**
+   * Transitions put at places (null takes one away): the old one's sound goes, and the new one's comes where it plays
+   * (one sound a moment).
+   */
+  const putTransitions = (e: ReelEdit, puts: { at: number; kind: TransitionKind | null }[], withSound: boolean): ReelEdit => {
+    const sounds = [...e.sounds];
+    const fresh: ReelEdit["sounds"] = [];
+    let transitions = [...e.transitions];
+    for (const { at, kind } of puts) {
+      const old = transitions.find((t) => Math.abs(t.at - at) < 0.001);
+      if (old && old.kind === kind) continue;
+      if (old) {
+        const paired = pairedTransitionSound(sounds, old);
+        if (paired >= 0) sounds.splice(paired, 1);
+        transitions = transitions.filter((t) => t !== old);
+      }
+      if (!kind) continue;
+      const spec = TRANSITIONS[kind];
+      const dirs = transitionDirs(kind);
+      const dir = old?.dir && dirs.includes(old.dir) ? old.dir : dirs[0];
+      transitions.push({ at, kind, ...(dir ? { dir } : {}), length: spec.length });
+      if (withSound && draft.options.sfx && spec.sound) fresh.push({ at, sound: spec.sound });
+    }
+    const next = parseTransitions(transitions, e.duration);
+    const plays = transitionJoints({ ...e, transitions: next });
+    for (const f of fresh) if (plays.some((j) => Math.abs(j.at - f.at) < 0.001) && !sounds.some((s) => Math.abs(s.at - f.at) < 0.15)) sounds.push(f);
+    return { ...e, transitions: next, sounds: sounds.sort((a, b) => a.at - b.at) };
+  };
+  // A place's transition from a moment before it (cut clock), to play or pause on.
+  const before = (at: number) => cutAt.toUpload(Math.max(0, cutAt.toCut(at) - (joints.find((j) => Math.abs(j.at - at) < 0.001)?.length ?? 0) / 2 - 0.6));
+  const transitionActions: TransitionActions = {
+    put: (at, kind, withSound) => {
+      setSelectedPlace(at);
+      setEdit((e) => putTransitions(e, [{ at, kind }], withSound));
+      // Paused on the cut, the picture shows it half way.
+      if (!playing) seek(at);
+    },
+    change: (at, patch) => setEdit((e) => ({ ...e, transitions: parseTransitions(e.transitions.map((t) => (Math.abs(t.at - at) < 0.001 ? { ...t, ...patch } : t)), e.duration) }), patch.length !== undefined ? `transition-length-${at}` : undefined),
+    putAll: (kind, withSound) =>
+      setEdit((e) => {
+        const at = transitionPlaces(e);
+        const gone = e.transitions.filter((t) => !at.some((p) => Math.abs(p - t.at) < 0.001)).map((t) => ({ at: t.at, kind: null }));
+        return putTransitions(putTransitions(e, gone, false), at.map((p) => ({ at: p, kind })), withSound);
+      }),
+    removeAll: () => setEdit((e) => putTransitions(e, e.transitions.map((t) => ({ at: t.at, kind: null })), false)),
+    select: (at) => {
+      setSelectedPlace(at);
+      video.current?.pause();
+      seek(at);
+    },
+    play: (at) => {
+      setSelectedPlace(at);
+      seek(before(at));
+      void video.current?.play();
+    },
   };
   const soundActions: SoundActions = {
     add: (at, sound) => setEdit((e) => ({ ...e, sounds: [...e.sounds, { at: ms(at), sound }].sort((a, b) => a.at - b.at) })),
@@ -438,6 +542,9 @@ export function ReelEditor({
     } else if (item.kind === "line" || item.kind === "zoom" || item.kind === "emoji") {
       wordActions.select(item.word);
       setTab(item.kind === "emoji" ? "Emojis" : "Text");
+    } else if (item.kind === "transition") {
+      setTab("Transitions");
+      transitionActions.select(item.at);
     } else if (item.kind === "effect") {
       seek(Math.max(0, draft.edit.effects[item.index].at - 0.6));
       setTab("Effects");
@@ -484,20 +591,20 @@ export function ReelEditor({
     setExported(draft);
   };
 
-  const until = new Date(editableUntil).toLocaleDateString("en", { day: "numeric", month: "short" });
+  const until = editableUntil ? new Date(editableUntil).toLocaleDateString("en", { day: "numeric", month: "short" }) : null;
   const keyName = behind ? "big word" : "highlight";
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6">
       {/* The bar: back, name, undo and redo, export. */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <ButtonLink href={`/dashboard/videos/${jobId}`} variant="tertiary" size="sm" aria-label="Back to the reel">
+        <ButtonLink href={`/dashboard/videos/${jobId}`} variant="tertiary" size="sm" aria-label={`Back to the ${noun}`}>
           <ArrowLeft />
         </ButtonLink>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-medium text-gray-1000">Edit reel</h1>
+          <h1 className="truncate text-base font-medium text-gray-1000">Edit {noun}</h1>
           <p className="truncate text-xs text-gray-900">
-            {name} · free exports until {until}
+            {name} · {until ? `free exports until ${until}` : "free exports"}
           </p>
         </div>
         <Button variant="tertiary" size="sm" onClick={undo} disabled={!history.past.length} aria-label="Undo">
@@ -519,35 +626,41 @@ export function ReelEditor({
               : exportState?.status === "done"
                 ? dirty
                   ? "You have changes since the last export."
-                  : "Exported: the reel's video now has your edits."
+                  : product
+                    ? "Exported: the video now has your edits."
+                    : "Exported: the reel's video now has your edits."
                 : `The last export failed${exportState?.error ? `: ${exportState.error}` : ""}. Try again.`)}
           {exportState?.status === "done" && !dirty && !error && (
             <a href={`/dashboard/videos/${jobId}`} className="ml-2 font-medium underline underline-offset-2">
-              View the reel
+              View the {noun}
             </a>
           )}
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+      <div className={cn("grid gap-6", columns)}>
         {/* The preview: the clean video with everything the render adds, drawn live. */}
         <div className="lg:sticky lg:top-4 lg:self-start">
-          <div ref={frameRef} className="relative mx-auto aspect-[9/16] w-full max-w-[240px] overflow-hidden rounded-xl bg-black sm:max-w-[300px] lg:max-w-[340px]">
+          <div ref={frameRef} className={cn("relative mx-auto w-full overflow-hidden rounded-xl bg-black", frameSize)} style={{ aspectRatio: `${aspect.width} / ${aspect.height}` }}>
             {svg}
-            <video
-              ref={video}
-              src={previewUrl}
-              playsInline
-              preload="auto"
-              className="absolute inset-0 size-full object-cover"
-              style={{ ...viewTransform(zoom, fx.dx, fx.dy, zoomAim(9, 16)), filter }}
-              onClick={toggle}
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-              onEnded={() => setPlaying(false)}
-              onSeeked={(e) => setTime(e.currentTarget.currentTime)}
-              onTimeUpdate={(e) => !playing && setTime(e.currentTarget.currentTime)}
-            />
+            {/* The picture: the video (and, through a transition, its two sides), moved and filtered as one. */}
+            <div className="absolute inset-0 isolate" style={{ ...viewTransform(zoom, fx.dx, fx.dy, zoomAim(aspect.width, aspect.height), fx.rot), filter }}>
+              <video
+                ref={video}
+                src={previewUrl}
+                playsInline
+                preload="auto"
+                className="absolute inset-0 size-full object-cover"
+                muted={!ownSound}
+                onClick={toggle}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+                onSeeked={(e) => setTime(e.currentTarget.currentTime)}
+                onTimeUpdate={(e) => !playing && setTime(e.currentTarget.currentTime)}
+              />
+              {joints.length > 0 && <TransitionLayers main={video} src={previewUrl} joints={joints} clock={cutAt} trims={trims} />}
+            </div>
             <BrollLayer shots={view.broll} time={viewTime} playing={playing} filter={filter} />
             <PictureLayers picture={draft.edit.picture} fx={fx} animate={playing} />
             <LiveCaptions
@@ -560,6 +673,7 @@ export function ReelEditor({
               onHook={editHook}
               onMove={(offset, done) => update((d) => ({ ...d, options: { ...d.options, look: { ...d.options.look, offset: offset || undefined } } }), done ? "move-done" : "move")}
               selected={inline && "word" in inline ? inline.word : null}
+              aspect={aspect}
             />
             {/* Paused on a stretch that's cut: it isn't in the video, and it can be put back. */}
             {!playing && inTrim >= 0 && (
@@ -577,7 +691,13 @@ export function ReelEditor({
                   <Play className="ml-0.5 size-4 fill-current" />
                 </button>
                 <span className="pointer-events-none absolute right-2 top-2.5 max-w-[calc(100%-3.75rem)] truncate rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-white backdrop-blur-sm">
-                  Click a caption to edit<span className="hidden sm:inline"> · drag to move</span>
+                  {captionsShown ? (
+                    <>
+                      Click a caption to edit<span className="hidden sm:inline"> · drag to move</span>
+                    </>
+                  ) : (
+                    "Click the video to play"
+                  )}
                 </span>
               </>
             )}
@@ -591,15 +711,16 @@ export function ReelEditor({
               onChange={(value) => ("word" in inline ? setEdit((e) => ({ ...e, words: e.words.map((w, i) => (i === inline.word ? { ...w, text: value } : w)) }), `inline-${inline.word}`) : setEdit((e) => ({ ...e, hook: value }), "hook"))}
               onDone={() => closeInline()}
               onCancel={() => closeInline(true)}
+              className={barWidth}
             >
               {"word" in inline && <WordPanel word={inline.word} edit={draft.edit} keyName={keyName} emojisOn={draft.options.emojis && !behind} zoomsOn={draft.options.zooms} sfxOn={draft.options.sfx} cut={cutWords.has(inline.word)} actions={wordActions} dark />}
             </InlineEditor>
           )}
-          <div className="mx-auto mt-3 flex w-full max-w-[300px] items-center gap-3 lg:max-w-[340px]">
+          <div className={cn("mx-auto mt-3 flex w-full items-center gap-3", barWidth)}>
             <Button variant="tertiary" size="sm" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
               {playing ? <Pause /> : <Play />}
             </Button>
-            <input type="range" min={0} max={view.duration} step={0.01} value={viewTime} onChange={(e) => seek(cutAt.toUpload(Number(e.target.value)))} className="h-1 min-w-0 flex-1 accent-[var(--ds-gray-1000)]" aria-label="Position in the reel" />
+            <input type="range" min={0} max={view.duration} step={0.01} value={viewTime} onChange={(e) => seek(cutAt.toUpload(Number(e.target.value)))} className="h-1 min-w-0 flex-1 accent-[var(--ds-gray-1000)]" aria-label={`Position in the ${noun}`} />
             <span className="shrink-0 text-xs tabular-nums text-gray-900" title={trims.length ? `Cut from ${clock(draft.edit.duration)} recorded` : undefined}>
               {clock(viewTime)} / {clock(view.duration)}
             </span>
@@ -610,7 +731,7 @@ export function ReelEditor({
         {/* What to change. */}
         <div className="min-w-0">
           <div className="mb-4 flex h-10 items-center gap-0.5 overflow-x-auto rounded-md border border-gray-alpha-400 bg-background-100 p-1" role="tablist" aria-label="Edit">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn("h-full flex-1 shrink-0 whitespace-nowrap rounded px-2 text-[13px] transition-colors sm:px-3 sm:text-sm", tab === t ? "bg-gray-alpha-200 font-medium text-gray-1000" : "text-gray-900 hover:text-gray-1000")}>
                 {t}
               </button>
@@ -621,17 +742,41 @@ export function ReelEditor({
 
           {tab === "Style" && (
             <div className="space-y-5">
-              <StylePicker value={draft.options.style} onChange={(style) => setOptions({ style })} changes={draft.options.look} />
-              {behind && (
-                <div>
-                  <p className="mb-2 text-[13px] text-gray-900">Big words font</p>
-                  <FontPicker value={draft.options.fonts} onChange={(fonts) => setOptions({ fonts })} />
-                </div>
+              {/* A product video can go without captions; one made before captions came after the agent has them in its picture. */}
+              {product && (
+                <label className={cn("flex items-start gap-3 rounded-lg border border-gray-alpha-400 p-3 text-sm", product.burned ? "opacity-70" : "cursor-pointer")}>
+                  <input type="checkbox" checked={captionsShown} disabled={product.burned} onChange={(e) => setOptions({ captions: e.target.checked })} className="mt-0.5 size-4 accent-[var(--ds-gray-1000)]" />
+                  <span>
+                    <span className="block font-medium text-gray-1000">Captions</span>
+                    <span className="mt-0.5 block text-xs text-gray-900">
+                      {product.burned ? "This video's captions are part of its picture, so they can't be restyled here. Request a change on the video's page to make a new version with editable captions." : "Word by word from the narration, in any style below."}
+                    </span>
+                  </span>
+                </label>
               )}
-              <LookEditor style={draft.options.style} changes={draft.options.look} onChange={(change) => update((d) => ({ ...d, options: { ...d.options, look: change(d.options.look) } }), "look")} fonts={draft.options.fonts} showPreview={false} />
+              {(!product || captionsShown) && (
+                <>
+                  <div>
+                    <p className="mb-2 text-[13px] font-medium text-gray-1000">Templates</p>
+                    <TemplateGallery value={matchingTemplate(draft.options.style, draft.options.look, draft.options.fonts)?.id} onPick={(t) => setOptions({ style: t.style, look: { ...t.look }, ...(t.fonts ? { fonts: [...t.fonts] } : {}) })} product={Boolean(product)} />
+                  </div>
+                  <div>
+                    <p className="mb-2 text-[13px] font-medium text-gray-1000">Caption style</p>
+                    <StylePicker value={draft.options.style} onChange={(style) => setOptions({ style })} changes={draft.options.look} styles={product ? REEL_STYLES.filter((x) => x !== "behind") : REEL_STYLES} />
+                  </div>
+                  {behind && (
+                    <div>
+                      <p className="mb-2 text-[13px] text-gray-900">Big words font</p>
+                      <FontPicker value={draft.options.fonts} onChange={(fonts) => setOptions({ fonts })} changes={draft.options.look} />
+                    </div>
+                  )}
+                  <LookEditor style={draft.options.style} changes={draft.options.look} onChange={(change) => update((d) => ({ ...d, options: { ...d.options, look: change(d.options.look) } }), "look")} fonts={draft.options.fonts} showPreview={false} />
+                </>
+              )}
             </div>
           )}
 
+          {tab === "Text" && !captionsShown && <p className="mb-3 rounded-md border border-gray-alpha-400 px-3 py-2 text-[13px] text-gray-900">Captions are off. The words still place emojis, punch-ins, sounds and cuts.</p>}
           {tab === "Text" && (
             <TranscriptEditor
               edit={draft.edit}
@@ -650,14 +795,17 @@ export function ReelEditor({
               sfxOn={draft.options.sfx}
               cut={cutWords}
               actions={wordActions}
+              noun={noun}
             />
           )}
 
-          {tab === "Cuts" && <CutsPanel edit={draft.edit} cutLength={view.duration} time={time} selected={selectedTrim} actions={trimActions} />}
+          {tab === "Cuts" && <CutsPanel edit={draft.edit} cutLength={view.duration} time={time} selected={selectedTrim} actions={trimActions} canCutPauses={!product} />}
+
+          {tab === "Transitions" && <TransitionsPanel places={places} edit={draft.edit} transitions={draft.edit.transitions} joints={joints} cutAt={cutAt} time={time} selected={selectedPlace} sfxOn={draft.options.sfx} actions={transitionActions} noun={noun} />}
 
           {tab === "B-roll" && <BrollPanel jobId={jobId} rows={brollRows} portrait={draft.edit.height > draft.edit.width} time={viewTime} current={shotHere} selected={selectedShot} actions={brollActions} />}
 
-          {tab === "Emojis" && <EmojiPanel edit={draft.edit} lines={lines} time={time} on={draft.options.emojis} behind={behind} actions={emojiActions} />}
+          {tab === "Emojis" && <EmojiPanel edit={draft.edit} lines={lines} time={time} on={draft.options.emojis} behind={behind} actions={emojiActions} noun={noun} />}
 
           {tab === "Effects" && (
             <div className="space-y-5">
@@ -665,21 +813,21 @@ export function ReelEditor({
                 <input type="checkbox" checked={draft.options.zooms} onChange={(e) => setOptions({ zooms: e.target.checked })} className="mt-0.5 size-4 accent-[var(--ds-gray-1000)]" />
                 <span>
                   <span className="block font-medium text-gray-1000">Punch-in zooms</span>
-                  <span className="mt-0.5 block text-xs text-gray-900">{draft.edit.zooms.length} in this reel. Add, remove or change their strength on any word in the Text tab.</span>
+                  <span className="mt-0.5 block text-xs text-gray-900">{wordless ? "Punch-ins go on words, and this video has no narration. Effects below can zoom at any moment." : `${draft.edit.zooms.length} in this ${noun}. Add, remove or change their strength on any word in the Text tab.`}</span>
                 </span>
               </label>
-              <EffectsPanel effects={draft.edit.effects} cuts={draft.edit.cuts} time={time} actions={effectActions} />
+              <EffectsPanel effects={draft.edit.effects} cuts={draft.edit.cuts} time={time} actions={effectActions} noun={noun} />
             </div>
           )}
 
           {tab === "Filters" && <FiltersPanel picture={draft.edit.picture} onChange={setPicture} />}
 
-          {tab === "Audio" && <AudioPanel sounds={draft.edit.sounds} hookSound={draft.edit.hookSound} hookOn={hookShown} on={draft.options.sfx} time={time} audio={draft.edit.audio} actions={soundActions} />}
+          {tab === "Audio" && <AudioPanel sounds={draft.edit.sounds} hookSound={draft.edit.hookSound} hookOn={hookShown} on={draft.options.sfx} time={time} audio={draft.edit.audio} actions={soundActions} video={product} />}
         </div>
       </div>
 
       <div className="mt-6">
-        <ReelTimeline edit={draft.edit} lines={lines} windows={windows} broll={brollSpans} time={time} duration={draft.edit.duration} showEmojis={draft.options.emojis && !behind} showZooms={draft.options.zooms} showSounds={draft.options.sfx} onSeek={seek} onPick={pick} />
+        <ReelTimeline edit={draft.edit} lines={lines} windows={windows} broll={brollSpans} joints={joints} time={time} duration={draft.edit.duration} showEmojis={draft.options.emojis && !behind} showZooms={draft.options.zooms} showSounds={draft.options.sfx} onSeek={seek} onPick={pick} />
       </div>
     </div>
   );
@@ -698,9 +846,9 @@ function runs(words: number[]): [number, number][] {
 }
 
 /** The edit bar under the video: the text, live as it's typed; Enter or Done keeps it, Escape puts it back. */
-function InlineEditor({ label, value, maxLength, onChange, onDone, onCancel, children }: { label: string; value: string; maxLength: number; onChange: (value: string) => void; onDone: () => void; onCancel: () => void; children?: React.ReactNode }) {
+function InlineEditor({ label, value, maxLength, onChange, onDone, onCancel, className, children }: { label: string; value: string; maxLength: number; onChange: (value: string) => void; onDone: () => void; onCancel: () => void; className?: string; children?: React.ReactNode }) {
   return (
-    <div className="mx-auto mt-2 w-full max-w-[300px] space-y-2.5 rounded-lg border border-white/10 bg-[#111214] p-2.5 text-white lg:max-w-[340px]">
+    <div className={cn("mx-auto mt-2 w-full space-y-2.5 rounded-lg border border-white/10 bg-[#111214] p-2.5 text-white", className ?? "max-w-[300px] lg:max-w-[340px]")}>
       <div className="flex items-center gap-2">
         <input
           autoFocus

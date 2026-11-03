@@ -54,6 +54,14 @@ export const FORMATS = [
     w: 22,
     h: 22,
   },
+  {
+    value: "portrait",
+    label: "Portrait",
+    ratio: "4:5",
+    where: "Instagram, Facebook, feed ads",
+    w: 18,
+    h: 23,
+  },
 ];
 
 const VIDEO_TYPE_OPTIONS = [
@@ -105,7 +113,7 @@ type QualityValue = (typeof QUALITY_OPTIONS)[number]["value"];
 
 const SOURCES = [
   { value: "WEBSITE", label: "Website", icon: <Globe />, hint: "Any public page. We read it the way a visitor sees it." },
-  { value: "GITHUB", label: "GitHub repo", icon: <GitBranch />, hint: "Public or private. For a private repo, add a read-only token below." },
+  { value: "GITHUB", label: "GitHub repo", icon: <GitBranch />, hint: "A repo, or a pull request or release link for a video about just that change. Public or private: for a private repo, add a read-only token below." },
 ] as const;
 
 // One click adds a proven direction to the brief.
@@ -119,7 +127,7 @@ const STEPS = [
   {
     label: "Product",
     title: "What should the video show?",
-    description: "Paste your website or GitHub repo. We read it and use your real UI, copy, colors and fonts.",
+    description: "Paste your website, your GitHub repo, or a pull request or release. We read it and use your real UI, copy, colors and fonts.",
   },
   {
     label: "Story",
@@ -228,7 +236,7 @@ export function NewVideoForm({
   function next() {
     if (step === 0 && !normalizeUrl(url)) {
       return setError({
-        message: sourceType === "GITHUB" ? "Enter a repo URL like https://github.com/owner/repo" : "Enter a website URL like https://yourproduct.com",
+        message: sourceType === "GITHUB" ? "Enter a GitHub link like https://github.com/owner/repo, or a pull request or release in it" : "Enter a website URL like https://yourproduct.com",
       });
     }
     goTo(step === 0 && activeTemplate ? LAST : step + 1);
@@ -365,13 +373,13 @@ export function NewVideoForm({
                 ))}
               </div>
               <div>
-                <Label htmlFor="sourceUrl">{sourceType === "GITHUB" ? "Repository URL" : "Website URL"}</Label>
+                <Label htmlFor="sourceUrl">{sourceType === "GITHUB" ? "Repo, pull request or release URL" : "Website URL"}</Label>
                 <Input
                   id="sourceUrl"
                   value={url}
                   onChange={(e) => onUrl(e.target.value)}
                   prefix={sourceType === "GITHUB" ? <GitBranch /> : <Globe />}
-                  placeholder={sourceType === "GITHUB" ? "https://github.com/owner/repo" : "https://yourproduct.com"}
+                  placeholder={sourceType === "GITHUB" ? "https://github.com/owner/repo  or  …/pull/123" : "https://yourproduct.com"}
                   autoFocus
                   autoComplete="url"
                   inputMode="url"
@@ -459,7 +467,7 @@ export function NewVideoForm({
             <>
               <div>
                 <Label>Format</Label>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3" role="radiogroup" aria-label="Format">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3" role="radiogroup" aria-label="Format">
                   {FORMATS.map((f) => (
                     <button
                       key={f.value}

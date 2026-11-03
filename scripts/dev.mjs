@@ -73,3 +73,14 @@ say("Starting the render Worker (the first start builds the video container; tha
 start("render", "npm", ["-w", "render", "run", "dev", "--", "--port", String(RENDER_PORT), "--ip", "127.0.0.1"]);
 say(`Starting the web app on http://localhost:${WEB_PORT} …`);
 start("web", "npm", ["-w", "web", "run", "dev", "--", "-p", String(WEB_PORT)]);
+
+// wrangler dev never fires the render Worker's cron, so jobs left running or queued by an earlier run would count
+// towards the 3-videos-in-progress limit forever. Run its safety net (fail and refund stale jobs) as production does:
+// once the Worker answers, then every 10 minutes (render/wrangler.jsonc).
+const sweep = () => fetch(`http://127.0.0.1:${RENDER_PORT}/cdn-cgi/local/scheduled`).then((res) => res.ok);
+const firstSweep = setInterval(async () => {
+  if (!(await sweep().catch(() => false))) return;
+  clearInterval(firstSweep);
+  setInterval(() => sweep().catch(() => {}), 10 * 60_000).unref();
+}, 5000);
+firstSweep.unref();

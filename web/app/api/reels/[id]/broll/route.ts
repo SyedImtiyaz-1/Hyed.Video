@@ -26,7 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const user = await requireUser();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Type a couple of words to search for." }, { status: 400 });
-  const job = isDemo ? (demoJobs().find((j) => j.id === id && j.kind === "reel") ?? null) : await (await getDb()).job.findFirst({ where: { id, userId: user.id, kind: "reel" } });
+  const job = isDemo ? (demoJobs().find((j) => j.id === id && j.kind === "reel") ?? null) : await (await getDb()).job.findFirst({ where: { id, userId: user.id, kind: { in: ["reel", "video"] } } });
   const reel = job ? parseReel(job.reel) : null;
   if (!job || !reel) return NextResponse.json({ error: "Reel not found" }, { status: 404 });
   const editable = reelEditable(job, reel);

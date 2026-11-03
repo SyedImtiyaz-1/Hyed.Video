@@ -3,10 +3,10 @@ import { ExampleVideo } from "@/components/showcase/example-video";
 import { cn } from "@/lib/cn";
 import { SHOWCASE, type ShowcaseVideo } from "@/lib/showcase";
 
-const RATIO: Record<ShowcaseVideo["format"], string> = { landscape: "16:9", vertical: "9:16", square: "1:1" };
+const RATIO: Record<ShowcaseVideo["format"], string> = { landscape: "16:9", vertical: "9:16", square: "1:1", portrait: "4:5" };
 
 // Every tile is as tall as the strip and as wide as its own shape.
-const TILE: Record<ShowcaseVideo["format"], string> = { landscape: "aspect-video", vertical: "aspect-[9/16]", square: "aspect-square" };
+const TILE: Record<ShowcaseVideo["format"], string> = { landscape: "aspect-video", vertical: "aspect-[9/16]", square: "aspect-square", portrait: "aspect-[4/5]" };
 
 /**
  * "Made with Hyped" as a moving wall: the gallery's videos at one height, each in its own shape, drifting sideways.

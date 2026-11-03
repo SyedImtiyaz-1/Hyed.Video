@@ -19,7 +19,7 @@ import { useRemix, type RemixStory } from "./use-remix";
 
 // The modal lives in the address (?recipe=…&url=…&notes=…&format=…): Back closes it and a reload keeps it open.
 const KEYS = ["recipe", "url", "notes", "format"] as const;
-const FORMAT_VALUES: Recipe["format"][] = ["landscape", "vertical", "square"];
+const FORMAT_VALUES: Recipe["format"][] = ["landscape", "vertical", "square", "portrait"];
 
 /** This page's address without the modal's keys, plus `extra`. */
 function address(extra: Record<string, string | undefined> = {}) {
@@ -76,6 +76,7 @@ const FRAME: Record<Recipe["format"], string> = {
   landscape: "aspect-video w-full",
   vertical: "aspect-[9/16] h-[42dvh] md:h-[min(52dvh,560px)]",
   square: "aspect-square w-full max-w-[min(440px,42dvh)] md:max-w-[min(440px,52dvh)]",
+  portrait: "aspect-[4/5] w-full max-w-[min(400px,34dvh)] md:max-w-[min(400px,42dvh)]",
 };
 
 function RecipeDialog({

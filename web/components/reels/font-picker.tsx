@@ -1,29 +1,70 @@
 "use client";
 import { Check } from "lucide-react";
 import { useState, type CSSProperties } from "react";
-import { REEL_FONTS, REEL_MAX_FONTS, type ReelFont } from "@launchreel/core/reel";
+import { resolveLook, type CaptionLook, type ReelLookChanges } from "@launchreel/core/captions";
+import { bigColorOf, bigWordText, REEL_FONTS, REEL_MAX_FONTS, type BigCasing, type ReelFont } from "@launchreel/core/reel";
 import { cn } from "@/lib/cn";
-import { abril, anton, archivo, dmSerif, kaushan, marker } from "./caption-fonts";
+import { abril, anton, archivo, archivoWide, bebas, dmSerif, fredoka, greatVibes, instrument, kaushan, lilita, luckiest, marker, playfair, poppins, pressStart, rubik } from "./caption-fonts";
 import { REEL_FONT_INFO } from "./labels";
 
-// Each style's sample word as the render writes it (BIG_LOOKS in runner/src/reel.ts): face, casing and colour.
-export const BIG_SAMPLES: Record<ReelFont, { word: string; className: string; style: CSSProperties }> = {
-  classic: { word: "MONEY", className: "font-black tracking-tight", style: { color: "#FFFFFF" } },
-  impact: { word: "MONEY", className: anton.className, style: { color: "#FFE135" } },
-  editorial: { word: "Money", className: abril.className, style: { color: "#F2462E" } },
-  elegant: { word: "money", className: dmSerif.className, style: { color: "#FFFFFF" } },
-  script: { word: "Money", className: kaushan.className, style: { color: "#4C9BFF" } },
-  marker: { word: "MONEY", className: marker.className, style: { color: "#FFFFFF" } },
-  outline: { word: "MONEY", className: "font-black tracking-tight", style: { color: "transparent", WebkitTextStroke: "1.5px #FFFFFF" } },
-  pop: { word: "MONEY", className: archivo.className, style: { color: "#C6FF3D", letterSpacing: "-0.02em" } },
+/** The letters' paint: filled in the colour, or (an outline style) only their outline in it, about as thick as the render's. */
+const paint = (color: string, hollow?: boolean): CSSProperties => (hollow ? { color: "transparent", WebkitTextStroke: `max(1.5px, 0.035em) ${color}` } : { color });
+
+/** The previews' sample big word, as said (each style, or the customer, cases it). */
+export const BIG_SAMPLE_WORD = "money";
+
+type BigSample = { word: string; casing: BigCasing; color: string; hollow?: boolean; className: string; style: CSSProperties };
+const sample = (casing: BigCasing, color: string, className: string, extra: CSSProperties = {}, hollow?: boolean): BigSample => ({
+  word: bigWordText(BIG_SAMPLE_WORD, casing),
+  casing,
+  color,
+  hollow,
+  className,
+  style: { ...extra, ...paint(color, hollow) },
+});
+
+// Each style's sample word as the render writes it (BIG_LOOKS in runner/src/reel.ts): face, casing, colour and spacing.
+export const BIG_SAMPLES: Record<ReelFont, BigSample> = {
+  classic: sample("upper", "#FFFFFF", "font-black tracking-tight"),
+  impact: sample("upper", "#FFE135", anton.className),
+  editorial: sample("title", "#F2462E", abril.className),
+  elegant: sample("lower", "#FFFFFF", dmSerif.className),
+  script: sample("title", "#4C9BFF", kaushan.className),
+  marker: sample("upper", "#FFFFFF", marker.className),
+  outline: sample("upper", "#FFFFFF", "font-black tracking-tight", {}, true),
+  pop: sample("upper", "#C6FF3D", archivo.className, { letterSpacing: "-0.02em" }),
+  chunky: sample("upper", "#FF8A1E", luckiest.className),
+  slim: sample("upper", "#FFD27A", instrument.className, { letterSpacing: "-0.01em" }),
+  poster: sample("upper", "#FF5C8A", bebas.className, { letterSpacing: "0.01em" }),
+  rounded: sample("lower", "#B39DFF", rubik.className, { letterSpacing: "-0.02em" }),
+  geometric: sample("lower", "#38E1C6", poppins.className, { letterSpacing: "-0.02em" }),
+  didone: sample("upper", "#E2C285", playfair.className, { letterSpacing: "-0.01em" }),
+  bubbly: sample("lower", "#FF8FC7", fredoka.className, { letterSpacing: "-0.01em" }),
+  calligraphy: sample("title", "#FFFFFF", greatVibes.className),
+  arcade: sample("upper", "#FA6C98", pressStart.className),
+  block: sample("upper", "#FFD800", lilita.className),
+  wide: sample("upper", "#FFFFFF", archivoWide.className, { letterSpacing: "-0.01em" }),
 };
+
+/**
+ * A big word's look on its turn, as the render draws it: the font style's face and spacing, the customer's casing
+ * (else the style's), and the customer's colours in turn (else the style's own). Turns are bigWords' in
+ * @launchreel/core/reel: the hook is turn 0, then each big word in order, so turn n takes fonts[n % fonts.length].
+ */
+export function bigWordLook(font: ReelFont, turn: number, look?: Pick<CaptionLook, "bigColors" | "bigCasing">): { casing: BigCasing; className: string; style: CSSProperties } {
+  const s = BIG_SAMPLES[font];
+  return { casing: look?.bigCasing ?? s.casing, className: s.className, style: { ...s.style, ...paint(bigColorOf(look?.bigColors, turn, s.color), s.hollow) } };
+}
 
 /**
  * "Behind you"'s font styles for the big words, each previewing its word behind a speaker's head. One by default (a
  * radio group); with "Mix fonts" on, up to REEL_MAX_FONTS that the big words take turns in, numbered in that order.
+ * With the customer's look changes, the samples take their big-word casing and colours: each style in the colour of
+ * its first turn (its place in the order; one not picked yet, the place it would take).
  */
-export function FontPicker({ value, onChange }: { value: ReelFont[]; onChange: (fonts: ReelFont[]) => void }) {
+export function FontPicker({ value, onChange, changes }: { value: ReelFont[]; onChange: (fonts: ReelFont[]) => void; changes?: ReelLookChanges }) {
   const [mixing, setMixing] = useState(value.length > 1);
+  const look = resolveLook("behind", changes);
   const pick = (font: ReelFont) => {
     if (!mixing) onChange([font]);
     else if (value.includes(font)) onChange(value.length > 1 ? value.filter((f) => f !== font) : value);
@@ -37,7 +78,7 @@ export function FontPicker({ value, onChange }: { value: ReelFont[]; onChange: (
           const order = value.indexOf(font);
           const selected = order >= 0;
           const full = mixing && !selected && value.length >= REEL_MAX_FONTS;
-          const sample = BIG_SAMPLES[font];
+          const sample = bigWordLook(font, selected ? order : mixing ? value.length : 0, look);
           return (
             <button
               key={font}
@@ -67,7 +108,7 @@ export function FontPicker({ value, onChange }: { value: ReelFont[]; onChange: (
                     textShadow: "0 2px 10px rgb(0 0 0 / 0.5)",
                   }}
                 >
-                  {sample.word}
+                  {bigWordText(BIG_SAMPLE_WORD, sample.casing)}
                 </span>
                 {/* The speaker's head, in front of the word, as the render puts their cut-out back on top. */}
                 <span className="absolute left-1/2 top-[52%] aspect-square w-[22%] -translate-x-1/2 rounded-full bg-[#0b1020]" />

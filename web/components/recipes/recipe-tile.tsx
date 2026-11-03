@@ -16,6 +16,7 @@ const TINT: Record<RecipeCategory, string> = {
   aftermovie: "150 110 255",
   updates: "255 180 60",
   ads: "255 90 140",
+  apps: "100 200 255",
   dev: "120 220 200",
 };
 
@@ -88,7 +89,7 @@ export function TileCaption({ title, detail }: { title: string; detail: string }
 export const TILE = "group relative block h-full shrink-0 snap-start overflow-hidden rounded-xl bg-gray-100 ring-1 ring-inset ring-gray-alpha-300";
 
 // A tile is as tall as its row; its width follows the recipe's shape.
-const SHAPE: Record<Recipe["format"], string> = { vertical: "aspect-[3/4]", square: "aspect-square", landscape: "aspect-[16/10]" };
+const SHAPE: Record<Recipe["format"], string> = { vertical: "aspect-[3/4]", square: "aspect-square", landscape: "aspect-[16/10]", portrait: "aspect-[4/5]" };
 
 /** A recipe in a gallery row: the sample Hyped made with it, or its cover until there's one. */
 export function RecipeTile({ recipe: r, open: options, className }: { recipe: Recipe; open?: RecipeOpenOptions; className?: string }) {

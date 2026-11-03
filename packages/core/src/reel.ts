@@ -2,7 +2,7 @@
 // back with word-by-word captions, keyword emphasis, emojis, punch-in zooms, sound effects and an optional hook title.
 // Shared by the web app (options, prices, upload limits), the render Worker and the runner (runner/src/reel.ts).
 // No Prisma here: the browser and the container import it.
-import { parseLookChanges, REEL_STYLES, type ReelLookChanges, type ReelStyle } from "./captions";
+import { parseLookChanges, REEL_STYLES, type CaptionLine, type ReelLookChanges, type ReelStyle } from "./captions";
 import { EFFECTS, isReelEffect, type PlacedEffect } from "./effects";
 import { customerError } from "./engines";
 import { parsePicture, type ReelPicture } from "./picture";
@@ -11,6 +11,8 @@ import { parseBroll, type BrollShot } from "./broll";
 import { isEditStyle, isStrength, type ReelEditStyle, type ReelStrength } from "./edit-styles";
 import { parseAudio, type ReelAudio } from "./music-beds";
 import { parseTrims, REEL_CLEANUPS, type ReelCleanup, type Trim } from "./trims";
+import { parseTransitions, type PlacedTransition } from "./transitions";
+import { strongestWord } from "./words";
 
 // The caption styles and what customers can change about them live in captions.ts.
 export { REEL_STYLES, type ReelStyle } from "./captions";
@@ -23,13 +25,61 @@ export type ReelLanguage = "auto" | "en" | "hinglish";
 export const REEL_LANGUAGES: readonly ReelLanguage[] = ["auto", "en", "hinglish"];
 
 /**
- * Font styles for "behind"'s big words (its small captions stay Inter, so they always read): white Inter, yellow Anton,
- * red Abril Fatface, white DM Serif italic, blue Kaushan Script, white Permanent Marker, hollow Inter, lime Archivo Black.
- * A reel takes one, or mixes up to REEL_MAX_FONTS: the big words take turns, in the order they were picked.
+ * Font styles for "behind"'s big words, each with a casing and colour of its own (the customer can change both for all
+ * of them: bigCasing and bigColors in the caption look): white Inter, yellow Anton, red Abril Fatface, white DM Serif
+ * italic, blue Kaushan Script, white Permanent Marker, hollow Inter, lime Archivo Black, orange Luckiest Guy, gold
+ * Instrument Serif italic, pink Bebas Neue, lavender lowercase Rubik, teal lowercase Poppins, gold Playfair Display
+ * capitals, pink lowercase Fredoka, white Great Vibes calligraphy, pink Press Start 2P pixels, yellow Lilita One and
+ * white wide Archivo. All are caption fonts too (runner/fonts). A reel takes one, or mixes up to REEL_MAX_FONTS: the big words take turns (bigWords), in the order
+ * the fonts were picked.
  */
-export type ReelFont = "classic" | "impact" | "editorial" | "elegant" | "script" | "marker" | "outline" | "pop";
-export const REEL_FONTS: readonly ReelFont[] = ["classic", "impact", "editorial", "elegant", "script", "marker", "outline", "pop"];
+export type ReelFont = "classic" | "impact" | "editorial" | "elegant" | "script" | "marker" | "outline" | "pop" | "chunky" | "slim" | "poster" | "rounded" | "geometric" | "didone" | "bubbly" | "calligraphy" | "arcade" | "block" | "wide";
+export const REEL_FONTS: readonly ReelFont[] = ["classic", "impact", "editorial", "elegant", "script", "marker", "outline", "pop", "chunky", "slim", "poster", "rounded", "geometric", "didone", "bubbly", "calligraphy", "arcade", "block", "wide"];
 export const REEL_MAX_FONTS = 4;
+
+/** How a big word is written: in capitals, lower case, with a capital first, or as said. */
+export type BigCasing = "upper" | "lower" | "title" | "as-said";
+
+/** A big word as a casing writes it: trailing commas and full stops dropped, then cased. */
+export function bigWordText(word: string, casing: BigCasing): string {
+  const text = word.replace(/[.,;:]+$/, "");
+  if (casing === "upper") return text.toLocaleUpperCase("en");
+  if (casing === "lower") return text.toLocaleLowerCase("en");
+  if (casing === "as-said") return text;
+  return text.charAt(0).toLocaleUpperCase("en") + text.slice(1);
+}
+
+/** A big word's colour on its turn: the customer's colours in turn, when they chose some, else its font's own. */
+export const bigColorOf = (colors: readonly string[] | undefined, turn: number, own: string) => (colors?.length ? colors[turn % colors.length] : own);
+
+/** One of "behind"'s big words: its caption line, its place on the line, when it shows, and its turn (bigWords). */
+export type BigWord = { line: number; word: number; start: number; end: number; turn: number };
+
+/**
+ * "Behind you"'s big words: each caption line's first highlighted word, else its strongest, from just before it's said
+ * to the end of its line (0.8 s at least), never into the next one or across a shot change (`cuts`, in seconds; one
+ * said just before a cut waits for the new shot). None is said before the hook ends (`hookEnd`, null without a hook),
+ * and one left on screen under 0.4 s is dropped (its word stays in the small captions).
+ *
+ * They take turns after the hook's: the hook is turn 0, and big word n is turn n, plus 1 when there's a hook. Fonts and
+ * colours go round by the turn (fonts[turn % fonts.length], bigColors[turn % bigColors.length]). The render and the
+ * previews both pick and time the big words with this, so they agree on each one's font and colour.
+ */
+export function bigWords(lines: readonly CaptionLine[], keywords: ReadonlySet<number>, hookEnd: number | null, duration = Infinity, cuts: readonly number[] = [], frame = 1 / 30): BigWord[] {
+  const shots: BigWord[] = [];
+  lines.forEach((g, line) => {
+    const marked = g.words.findIndex((w) => keywords.has(w.i));
+    const k = marked >= 0 ? marked : strongestWord(g.words);
+    if (k === null || g.words[k].start < (hookEnd ?? 0)) return;
+    let [start, end] = [Math.max(0, g.words[k].start - 0.05), Math.min(duration, Math.max(g.end, g.words[k].start + 0.8))];
+    const cut = cuts.find((c) => c > start && c < end);
+    if (cut !== undefined && cut - start < 0.4) start = cut;
+    else if (cut !== undefined) end = cut - frame;
+    shots.push({ line, word: k, start, end, turn: 0 });
+  });
+  shots.forEach((s, i) => (s.end = Math.min(s.end, (shots[i + 1]?.start ?? Infinity) - 0.04)));
+  return shots.filter((s) => s.end - s.start >= 0.4).map((s, n) => ({ ...s, turn: n + (hookEnd === null ? 0 : 1) }));
+}
 
 /**
  * What the customer picks: an edit style (edit-styles.ts) and its strength, the caption style and their changes to it
@@ -37,8 +87,10 @@ export const REEL_MAX_FONTS = 4;
  * cut can be put back in the editor). The edit style sets the rest as a starting point; the first render also takes
  * its picture grade, music bed and cut effects from it.
  */
-export type ReelOptions = { style: ReelStyle; look: ReelLookChanges; fonts: ReelFont[]; emojis: boolean; zooms: boolean; sfx: boolean; hook: boolean; broll: boolean; language: ReelLanguage; cleanup: ReelCleanup; editStyle: ReelEditStyle; strength: ReelStrength };
+export type ReelOptions = { style: ReelStyle; look: ReelLookChanges; fonts: ReelFont[]; emojis: boolean; zooms: boolean; sfx: boolean; hook: boolean; broll: boolean; language: ReelLanguage; cleanup: ReelCleanup; editStyle: ReelEditStyle; strength: ReelStrength; captions?: boolean };
 export const REEL_DEFAULTS: ReelOptions = { style: "bold", look: {}, fonts: ["classic"], emojis: true, zooms: true, sfx: true, hook: true, broll: true, language: "auto", cleanup: "pauses", editStyle: "creator", strength: "medium" };
+/** Whether the captions are drawn: reels always have them; a product video has them when it's narrated and they're on. */
+export const captionsOn = (options: Pick<ReelOptions, "captions">) => options.captions !== false;
 
 /** Font styles read back defensively: known ones, each once, at most REEL_MAX_FONTS, else Classic. */
 export function parseFonts(value: unknown): ReelFont[] {
@@ -53,16 +105,44 @@ export type ReelExport = { revision: number; status: "rendering" | "done" | "fai
  * Job.reel: the options plus the uploaded file, stored in R2 at uploads/<userId>/<random>.<ext> (kept REEL_EDIT_DAYS,
  * then the bucket's lifecycle rule deletes it), and the latest re-export.
  */
-export type ReelJob = ReelOptions & { key: string; fileName: string; bytes: number; durationSec: number; width: number | null; height: number | null; export?: ReelExport };
+export type ReelJob = ReelOptions & { key: string; fileName: string; bytes: number; durationSec: number; width: number | null; height: number | null; export?: ReelExport; video?: VideoSource };
 
-/** How long a reel stays editable, with free re-exports: its upload is kept this long. */
+/**
+ * A product video (Job.kind "video") opened in the same editor. Its clean copy (jobs/<id>/source.mp4: the agent's video,
+ * without the captions, which the render adds) is the editor's upload, kept as long as the video. What that copy has in
+ * it already: captions drawn into the picture and the free trial's mark (videos made before captions were added after
+ * the agent), whether it's narrated, and whether the narration was kept on its own (jobs/<id>/voice.m4a), so the music
+ * can be changed under it. While an older video is being made ready, Job.reel.export is revision 0.
+ */
+export type VideoSource = { burned: boolean; watermarked: boolean; narrated: boolean; voice: boolean };
+/** A narrated video whose narration wasn't kept on its own keeps its soundtrack: a new bed would lose the voice. */
+export const musicLocked = (video: VideoSource | null | undefined) => Boolean(video?.narrated && !video.voice);
+export const sourceKey = (jobId: string) => `jobs/${jobId}/source.mp4`;
+export const voiceKey = (jobId: string) => `jobs/${jobId}/voice.m4a`;
+
+/** How long a reel stays editable, with free re-exports: its upload is kept this long. Product videos keep theirs. */
 export const REEL_EDIT_DAYS = 7;
 
-/** Whether a reel can still be edited: finished, made within REEL_EDIT_DAYS, not re-exporting right now. */
+/** Whether a reel or product video can still be edited: finished, and for a reel, made within REEL_EDIT_DAYS. */
 export function reelEditable(job: { status: string; createdAt: Date }, reel: ReelJob | null, now = Date.now()): { ok: boolean; reason?: string } {
-  if (!reel || job.status !== "SUCCEEDED") return { ok: false, reason: "Only finished reels can be edited." };
+  if (!reel || job.status !== "SUCCEEDED") return { ok: false, reason: reel?.video ? "Only finished videos can be edited." : "Only finished reels can be edited." };
+  if (reel.video) return { ok: true };
   if (now - job.createdAt.getTime() > REEL_EDIT_DAYS * 86_400_000) return { ok: false, reason: `Reels can be edited for ${REEL_EDIT_DAYS} days after they're made; this one's upload has been deleted.` };
   return { ok: true };
+}
+
+/**
+ * A product video's starting options: as it was made. The captions start as the agent's used to look (a dark box at
+ * the bottom, the spoken word in the brand's colour), when it's narrated and they're on; nothing else is added.
+ */
+export function videoOptions(captions: boolean, accent?: string | null): ReelOptions {
+  const look = parseLookChanges({ position: "bottom", accent: accent ?? undefined });
+  return { ...REEL_DEFAULTS, style: "box", look, hook: false, broll: false, cleanup: "off", captions };
+}
+
+/** An edit that changes nothing: the words, and where the picture cuts from shot to shot. */
+export function blankEdit(duration: number, width: number, height: number, words: ReelEdit["words"], cuts: number[] = []): ReelEdit {
+  return parseReelEdit({ version: 1, duration, width, height, words, cuts }) ?? { version: 1, duration, width, height, words: [], hidden: [], breaks: [], keywords: [], emojis: [], emojiStyle: { size: "m", place: "auto" }, zooms: [], sounds: [], hookSound: null, effects: [], picture: parsePicture(null), cuts: [], hook: "", trims: [], audio: parseAudio(null), broll: [], transitions: [] };
 }
 
 /** How far a punch-in goes: a little, a normal punch, or a lot closer. */
@@ -112,6 +192,8 @@ export type ReelEdit = {
   trims: Trim[];
   audio: ReelAudio;
   broll: BrollShot[];
+  /** Transitions between shots, at jump cuts and cuts (transitions.ts). */
+  transitions: PlacedTransition[];
 };
 
 // What the caption fonts can draw (as the runner checks): Latin, Greek and Cyrillic letters, digits and punctuation.
@@ -139,7 +221,8 @@ const MAX_MARKS = 300;
 export function parseReelEdit(value: unknown, original?: ReelEdit): ReelEdit | null {
   if (!value || typeof value !== "object") return null;
   const v = value as { [K in keyof ReelEdit]?: unknown } & { words?: unknown };
-  if (!Array.isArray(v.words) || !v.words.length) return null;
+  // A product video without a voiceover has no words: everything but the captions still edits.
+  if (!Array.isArray(v.words)) return null;
   const base = original ?? (v as Partial<ReelEdit>);
   if (original && v.words.length !== original.words.length) return null;
   const words = (v.words as { text?: unknown; start?: unknown; end?: unknown }[]).map((w, i) => {
@@ -191,7 +274,7 @@ export function parseReelEdit(value: unknown, original?: ReelEdit): ReelEdit | n
     width: Number(base.width) || 1080,
     height: Number(base.height) || 1920,
     words,
-    hidden: indices(v.hidden).filter((i) => i < words.length).slice(0, words.length - 1),
+    hidden: indices(v.hidden).filter((i) => i < words.length).slice(0, Math.max(0, words.length - 1)),
     breaks: indices(v.breaks),
     keywords: indices(v.keywords),
     emojis,
@@ -206,6 +289,7 @@ export function parseReelEdit(value: unknown, original?: ReelEdit): ReelEdit | n
     trims: parseTrims(v.trims, duration),
     audio: parseAudio(v.audio),
     broll: parseBroll(v.broll, duration),
+    transitions: parseTransitions(v.transitions, duration),
   };
 }
 
@@ -261,7 +345,20 @@ export type ReelSpec = {
    * speech recognition and the planner.
    */
   edit?: boolean;
+  /**
+   * A product video instead of a reel: `input` is its clean copy, with its own soundtrack. Its words come from the
+   * narration's script (`words`, the voice tool's captions.json, on the first run), not speech recognition; nothing is
+   * planned or cut. A new music bed goes under `voice`, the narration alone (null without a voiceover). `editorOnly`:
+   * write what the editor opens (the edit, the preview, the narration) and stop, without rendering the video.
+   */
+  video?: { voice: string | null; words?: string | null; editorOnly?: boolean };
 };
+
+function parseVideoSource(value: unknown): VideoSource | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Partial<VideoSource>;
+  return { burned: v.burned === true, watermarked: v.watermarked === true, narrated: v.narrated === true || v.voice === true, voice: v.voice === true };
+}
 
 /** Job.reel read back defensively: defaults for anything missing, null when it isn't a reel. */
 export function parseReel(value: unknown): ReelJob | null {
@@ -286,6 +383,8 @@ export function parseReel(value: unknown): ReelJob | null {
     hook: flag(v.hook, REEL_DEFAULTS.hook),
     // Reels from before B-roll had none.
     broll: flag(v.broll, false),
+    ...(v.captions === false ? { captions: false } : {}),
+    ...(parseVideoSource(v.video) ? { video: parseVideoSource(v.video)! } : {}),
     language: REEL_LANGUAGES.includes(v.language as ReelLanguage) ? (v.language as ReelLanguage) : REEL_DEFAULTS.language,
     // Reels from before cleanup cut nothing.
     cleanup: REEL_CLEANUPS.includes(v.cleanup as ReelCleanup) ? (v.cleanup as ReelCleanup) : "off",

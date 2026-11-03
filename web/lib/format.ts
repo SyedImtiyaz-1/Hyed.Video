@@ -49,7 +49,7 @@ export function toneLabel(tone: string | null): string {
   return TONE_LABELS[tone] ?? tone.charAt(0).toUpperCase() + tone.slice(1).replace(/-/g, " ");
 }
 
-export const FORMAT_LABEL: Record<string, string> = { landscape: "16:9", vertical: "9:16", square: "1:1" };
+export const FORMAT_LABEL: Record<string, string> = { landscape: "16:9", vertical: "9:16", square: "1:1", portrait: "4:5" };
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

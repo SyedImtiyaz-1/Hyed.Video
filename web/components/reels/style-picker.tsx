@@ -4,10 +4,10 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { REEL_STYLES, resolveLook, type ReelLookChanges, type ReelStyle } from "@launchreel/core/captions";
 import { effectsAt } from "@launchreel/core/effects";
 import { parsePicture, type ReelPicture } from "@launchreel/core/picture";
-import type { ReelFont } from "@launchreel/core/reel";
+import { bigWordText, type ReelFont } from "@launchreel/core/reel";
 import { cn } from "@/lib/cn";
 import { CaptionPreview } from "./caption-preview";
-import { BIG_SAMPLES } from "./font-picker";
+import { BIG_SAMPLE_WORD, bigWordLook } from "./font-picker";
 import { REEL_STYLE_INFO } from "./labels";
 import { PictureLayers, useVideoFilter } from "./picture-layers";
 
@@ -30,7 +30,10 @@ export function useTick(ms = 450) {
  * the frame takes that grade and its overlays (an edit style's look), drawn by the editor's own filter code.
  */
 export function StyleFrame({ style, changes, fonts = ["classic"], tick, className, picture }: { style: ReelStyle; changes?: ReelLookChanges; fonts?: ReelFont[]; tick: number; className?: string; picture?: Partial<ReelPicture> }) {
-  const big = BIG_SAMPLES[fonts[Math.floor(tick / 4) % fonts.length]];
+  // "Behind you"'s big word takes a turn every fourth tick, as the render's words do: the next font and colour (the
+  // customer's colours and casing, when they chose them).
+  const turn = Math.floor(tick / 4);
+  const big = bigWordLook(fonts[turn % fonts.length], turn, style === "behind" ? resolveLook(style, changes) : undefined);
   const look = parsePicture({ filter: "none", strength: 1, grain: false, vignette: false, letterbox: false, ...picture });
   const { filter, svg } = useVideoFilter(look, STILL, 160);
   return (
@@ -42,7 +45,7 @@ export function StyleFrame({ style, changes, fonts = ["classic"], tick, classNam
       {style === "behind" && (
         <>
           <span className={cn("absolute inset-x-0 top-[21%] text-center leading-none", big.className)} style={{ ...big.style, fontSize: "19cqw", textShadow: "0 0.6cqw 2.5cqw rgb(0 0 0 / 0.45)" } as CSSProperties}>
-            {big.word}
+            {bigWordText(BIG_SAMPLE_WORD, big.casing)}
           </span>
           {/* eslint-disable-next-line @next/next/no-img-element -- the speaker cut out of the same still */}
           <img src="/reels/sample-person.webp" alt="" className="absolute inset-0 size-full object-cover" loading="lazy" decoding="async" />
@@ -54,13 +57,13 @@ export function StyleFrame({ style, changes, fonts = ["classic"], tick, classNam
 }
 
 /** The caption styles, each previewing itself on the sample frame, as a radio group. */
-export function StylePicker({ value, onChange, changes }: { value: ReelStyle; onChange: (style: ReelStyle) => void; changes?: ReelLookChanges }) {
+export function StylePicker({ value, onChange, changes, styles = REEL_STYLES }: { value: ReelStyle; onChange: (style: ReelStyle) => void; changes?: ReelLookChanges; styles?: readonly ReelStyle[] }) {
   const tick = useTick();
   return (
     <div>
       {/* A row to swipe through on phones, a grid from tablets up. */}
       <div className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-6" role="radiogroup" aria-label="Caption style">
-        {REEL_STYLES.map((style) => {
+        {styles.map((style) => {
           const selected = value === style;
           return (
             <button

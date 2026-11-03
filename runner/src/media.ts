@@ -57,6 +57,11 @@ export function master(input: string, out: string) {
   // loudnorm prints its measurement to stderr.
   const report = spawnSync("ffmpeg", ["-hide_banner", "-nostats", "-i", input, "-af", `loudnorm=${target}:print_format=json`, "-f", "null", "-"], { encoding: "utf8" }).stderr ?? "";
   const m = JSON.parse(report.slice(report.lastIndexOf("{"), report.lastIndexOf("}") + 1)) as Record<string, string>;
+  // Silence (a product video with no narration and no music) has no loudness to correct, and loudnorm refuses -inf.
+  if (!(Number(m.input_i) > -60)) {
+    ffmpeg(["-i", input, "-ar", "48000", "-c:a", "aac", "-b:a", "192k", out]);
+    return;
+  }
   const measured = `measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
   ffmpeg(["-i", input, "-af", `loudnorm=${target}:${measured}`, "-ar", "48000", "-c:a", "aac", "-b:a", "192k", out]);
 }
