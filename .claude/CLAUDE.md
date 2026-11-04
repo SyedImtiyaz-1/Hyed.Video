@@ -36,8 +36,11 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   E1, the local editor, the editor's full window, the sidebar) is PR #13 (`launch/realtime-editor`), merged 2 Nov; PR #14
   merged `launch/caption-styles` into `main` the same day. The 2–3 Nov work after it (Ask AI before the clip, the
   Library and click-to-open, blank Ask AI, `/api/local/file`, the desktop app plan, the Home greeting, Settings) is
-  PR #15 (3 Nov, `launch/ask-ai-settings` → `launch/caption-styles`), open for Syed's review; it adds
-  `ReelAssistant.projectChat` to the render Worker, so render deploys with or before web.
+  PR #15 (`launch/ask-ai-settings`), merged 3 Nov; it added
+  `ReelAssistant.projectChat` to the render Worker, so render deploys with or before web. The 3–4 Nov work after it
+  (the editor in Cardboard's look, Ask AI's "Worked for" steps, renaming projects with `Job.title`, no Revisions card
+  on the video page: Syed asked on Slack, 3 Nov, since changes go through the editor's Ask AI) is PR #18
+  (`launch/editor-look` → `launch/caption-styles`), open for Syed's review; it needs `npm run prod:db` for `Job.title`.
 - PR #6, `launch/landing-refresh` (27 Oct): a Cardboard-style landing page (full-screen hero
   with a prompt box: link + words + recipe menu + clip upload, "Auto" picks a recipe in `web/lib/prompt.ts`; floating
   sample tiles; a timeline ruler; the recipes gallery right below; then the examples strip, feature bento, pricing) and Recipes M1 (`packages/core/src/recipes.ts`, `/recipes`,
