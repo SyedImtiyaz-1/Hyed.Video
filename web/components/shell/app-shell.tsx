@@ -99,10 +99,11 @@ export function AppShell(props: ShellProps) {
   );
 
   // The editor takes the whole window, nothing over it (Taibanaz, 2 Nov: room for the preview); its bar's back button
-  // leaves it.
+  // leaves it. It's always dark, whatever the theme, as video editors are (Taibanaz, 4 Nov): `dark` here sets the dark
+  // tokens for everything inside.
   if (EDITOR.test(pathname)) {
     return (
-      <div className="flex min-h-dvh flex-col bg-background-100">
+      <div className="dark flex min-h-dvh flex-col bg-editor-app text-gray-1000">
         {demoBanner}
         <main className="flex-1">{props.children}</main>
       </div>

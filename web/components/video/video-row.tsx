@@ -2,9 +2,10 @@ import type { Job } from "@launchreel/core";
 import { customerError } from "@launchreel/core/engines";
 import { Captions, ChevronRight, GitBranch, Globe } from "lucide-react";
 import type { ReelJob } from "@launchreel/core/reel";
-import { REEL_STYLE_INFO, reelName } from "@/components/reels/labels";
+import { REEL_STYLE_INFO } from "@/components/reels/labels";
 import Link from "next/link";
-import { FORMAT_LABEL, formatDuration, hostOf, renderSeconds, shortId, timeAgo, toneLabel } from "@/lib/format";
+import { FORMAT_LABEL, formatDuration, renderSeconds, shortId, timeAgo, toneLabel } from "@/lib/format";
+import { projectName } from "@/lib/project-name";
 import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/ui/status";
 import { VideoThumb } from "./video-thumb";
@@ -22,7 +23,7 @@ export function VideoRow({ job }: { job: Job }) {
       <div className="flex min-w-0 items-center gap-3">
         <VideoThumb job={job} />
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-gray-1000">{reel ? reelName(job.sourceUrl) : hostOf(job.sourceUrl)}</p>
+          <p className="truncate text-sm font-medium text-gray-1000">{projectName(job)}</p>
           <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-gray-900">
             <span className="font-mono">{shortId(job.id)}</span>
             {job.parentJobId && <Badge tone="purple">Revision</Badge>}

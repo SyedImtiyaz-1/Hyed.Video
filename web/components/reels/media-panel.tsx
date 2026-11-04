@@ -1,5 +1,6 @@
 "use client";
-import { Film, Music, Plus, Video } from "lucide-react";
+import { Film, Music, Play, Plus, Search } from "lucide-react";
+import { useState } from "react";
 import { REEL_MUSIC, type ReelAudio } from "@launchreel/core/music-beds";
 import type { BrollRow } from "./broll-panel";
 
@@ -15,9 +16,9 @@ export function shapeName(width: number, height: number) {
 }
 
 /**
- * What's in the project: the clip it's made from, the stock B-roll in it and its music, each opening the tool that edits
- * it. Several uploads a video (clips, photos, audio) are on the roadmap: a row says so, rather than a button that
- * doesn't work.
+ * The project's library, as Cardboard's: a search over what's in it and Add, then its media as tiles: the clip it's made
+ * from (its first moments as the picture, its length on it), the stock B-roll in it and its music, each opening the tool
+ * that edits it. Several uploads a video (clips, photos, audio) are on the roadmap, so Add says so rather than working.
  */
 export function MediaPanel({
   name,
@@ -42,66 +43,65 @@ export function MediaPanel({
   onShot: (index: number) => void;
   onMusic: () => void;
 }) {
-  const shown = broll.filter((r) => r.at !== null).length;
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shows = (label: string) => !q || label.toLowerCase().includes(q);
+  const shots = broll.map((r, i) => ({ r, i })).filter(({ r }) => shows(r.shot.query || "Stock clip"));
+  const track = music ? REEL_MUSIC[music.track].label : null;
+  const nothing = !shows(name) && !shots.length && !(track && shows(track));
   return (
-    <div className="space-y-5">
-      <section>
-        <p className="mb-2 text-[13px] text-gray-900">Your clip</p>
-        <div className="flex items-center gap-3 rounded-lg border border-gray-alpha-400 p-2">
-          <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black">
-            {/* The clip's first moments as its thumbnail (#t: the browser loads just enough to show that frame). */}
-            <video src={`${previewUrl}#t=0.5`} preload="metadata" muted playsInline className="absolute inset-0 size-full object-cover" aria-hidden />
-            <Video className="relative size-4 text-white/70" aria-hidden />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-gray-1000">{name}</p>
-            <p className="mt-0.5 text-xs text-gray-900">
-              {clock(cutLength)} after cuts · {clock(duration)} recorded · {shapeName(width, height)}
+    <div>
+      <div className="mb-4 flex items-center gap-2">
+        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg bg-gray-alpha-100 px-2.5 text-gray-900 focus-within:ring-1 focus-within:ring-gray-alpha-500">
+          <Search className="size-3.5 shrink-0" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search project media" aria-label="Search project media" className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-1000 outline-none placeholder:text-gray-900" />
+        </label>
+        <button type="button" disabled title="More clips, photos and audio in one video: coming soon" className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-gray-alpha-400 px-3 text-[13px] text-gray-1000 disabled:opacity-50">
+          <Plus className="size-3.5" />
+          Add
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {shows(name) && (
+          <div title={`${clock(cutLength)} after cuts · ${clock(duration)} recorded · ${shapeName(width, height)}`}>
+            <div className="relative aspect-[4/5] overflow-hidden rounded-lg bg-black">
+              {/* The clip's first moments as its picture (#t: the browser loads just enough to show that frame). */}
+              <video src={`${previewUrl}#t=0.5`} preload="metadata" muted playsInline className="absolute inset-0 size-full object-cover" aria-hidden />
+              <span className="absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums text-white">{clock(cutLength)}</span>
+            </div>
+            <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-1000">
+              <Play className="size-3 shrink-0 fill-current text-gray-900" />
+              <span className="truncate">{name}</span>
             </p>
           </div>
-          <button type="button" disabled title="Replacing the clip is coming soon" className="h-8 shrink-0 rounded-md border border-gray-alpha-400 px-2.5 text-xs text-gray-900 disabled:opacity-60">
-            Replace
-          </button>
-        </div>
-      </section>
-
-      <section>
-        <p className="mb-2 text-[13px] text-gray-900">
-          B-roll{broll.length ? ` · ${shown} in the video` : ""}
-        </p>
-        {broll.length ? (
-          <ul className="space-y-1">
-            {broll.map((r, i) => (
-              <li key={`${r.shot.clip.source}:${r.shot.clip.id}:${r.shot.at}`}>
-                <button type="button" onClick={() => onShot(i)} className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-gray-alpha-100">
-                  <Film className="size-4 shrink-0 text-gray-900" />
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-gray-1000">{r.shot.query || "Stock clip"}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-gray-900">{r.at === null ? "not shown" : `${clock(r.at)} · ${seconds(r.length)}`}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-gray-900">No B-roll yet. Add stock shots from the B-roll tool, or ask the AI for some.</p>
         )}
-      </section>
-
-      <section>
-        <p className="mb-2 text-[13px] text-gray-900">Music</p>
-        <button type="button" onClick={onMusic} className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-gray-alpha-100">
-          <Music className="size-4 shrink-0 text-gray-900" />
-          <span className="min-w-0 flex-1 truncate text-[13px] text-gray-1000">{music ? REEL_MUSIC[music.track].label : "No music"}</span>
-          <span className="shrink-0 text-xs text-gray-900">{music ? `${Math.round(music.volume * 100)}%` : "Pick a track"}</span>
-        </button>
-      </section>
-
-      <div aria-disabled className="flex items-start gap-2.5 rounded-lg border border-dashed border-gray-alpha-500 p-3">
-        <Plus className="mt-0.5 size-4 shrink-0 text-gray-900" />
-        <span>
-          <span className="block text-[13px] font-medium text-gray-1000">Add media · soon</span>
-          <span className="mt-0.5 block text-xs text-gray-900">More clips, photos and audio in one video are on the way.</span>
-        </span>
+        {shots.map(({ r, i }) => (
+          <button key={`${r.shot.clip.source}:${r.shot.clip.id}:${r.shot.at}`} type="button" onClick={() => onShot(i)} className="text-left">
+            <span className="relative flex aspect-[4/5] items-center justify-center rounded-lg bg-gray-alpha-100 transition-colors hover:bg-gray-alpha-200">
+              <Film className="size-5 text-gray-900" />
+              <span className="absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums text-white">{r.at === null ? "not shown" : seconds(r.length)}</span>
+            </span>
+            <span className="mt-1.5 block truncate text-xs text-gray-1000">{r.shot.query || "Stock clip"}</span>
+          </button>
+        ))}
+        {track && shows(track) && (
+          <button type="button" onClick={onMusic} className="text-left">
+            <span className="relative flex aspect-[4/5] items-center justify-center rounded-lg bg-gray-alpha-100 transition-colors hover:bg-gray-alpha-200">
+              <Music className="size-5 text-gray-900" />
+              <span className="absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums text-white">{Math.round(music!.volume * 100)}%</span>
+            </span>
+            <span className="mt-1.5 block truncate text-xs text-gray-1000">{track}</span>
+          </button>
+        )}
       </div>
+      {nothing && <p className="mt-2 text-xs text-gray-900">Nothing in this project matches “{query.trim()}”.</p>}
+      {!q && !music && (
+        <button type="button" onClick={onMusic} className="mt-4 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000">
+          <Music className="size-3.5" />
+          Add music
+        </button>
+      )}
     </div>
   );
 }

@@ -1,13 +1,15 @@
 import { ArrowLeft, Plus, Sparkles } from "lucide-react";
 import { NEW_PROJECT } from "@/components/shell/nav";
+import { ProjectTitle } from "@/components/shell/project-title";
 import { ButtonLink } from "@/components/ui/button";
 
 /**
  * The editor's frame for what the reel editor can't edit yet (components/reels/reel-editor.tsx has the same layout):
- * a video while its first cut is being made, and product videos. The bar, the library on the left, the stage in the
- * middle, Ask AI on the right, the timeline below; on phones one column.
+ * a video while its first cut is being made, and product videos. The bar (the project's name, renamed in place), the
+ * library on the left, the stage in the middle, Ask AI on the right, the timeline below; on phones one column.
  */
 export function EditorFrame({
+  jobId,
   name,
   detail,
   actions,
@@ -16,6 +18,7 @@ export function EditorFrame({
   side,
   timeline,
 }: {
+  jobId: string;
   name: string;
   detail: string;
   actions?: React.ReactNode;
@@ -32,7 +35,7 @@ export function EditorFrame({
           <ArrowLeft />
         </ButtonLink>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-medium text-gray-1000">{name}</h1>
+          <ProjectTitle jobId={jobId} name={name} />
           <p className="truncate text-xs text-gray-900">{detail}</p>
         </div>
         <ButtonLink href={NEW_PROJECT} variant="secondary" size="sm" title="Start a new project in an empty editor" aria-label="New project">
@@ -50,7 +53,7 @@ export function EditorFrame({
         {/* Ask AI: the editor's full height, beside the timeline too (the timeline is under the library and the stage). */}
         <div className="order-3 flex min-w-0 flex-col lg:order-none lg:row-span-2 lg:min-h-0">
           <p className="mb-3 flex items-center gap-1.5 text-sm font-medium text-gray-1000">
-            <Sparkles className="size-3.5 text-brand" /> Ask AI
+            <Sparkles className="size-3.5" /> Ask AI
           </p>
           <div className="flex min-h-[200px] flex-1 flex-col">{side}</div>
         </div>

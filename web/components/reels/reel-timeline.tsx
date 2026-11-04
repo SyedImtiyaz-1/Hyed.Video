@@ -1,5 +1,5 @@
 "use client";
-import { Eye, EyeOff, Minus, Plus, Scissors, X } from "lucide-react";
+import { AudioLines, Captions, Eye, EyeOff, Film, Magnet, Maximize, Minimize, Music, Pause, Play, Redo2, Scissors, SkipBack, SkipForward, Smile, Sparkles, Undo2, Video, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { CaptionLine } from "@launchreel/core/captions";
 import { EFFECTS, effectSpan } from "@launchreel/core/effects";
@@ -22,10 +22,31 @@ export type TimelineItem =
 export type BrollSpan = { index: number; start: number; end: number; query: string };
 /** A piece being dragged: by its body (moved) or by an edge (resized), `delta` seconds from where the drag began. */
 export type TimelineDrag = { item: TimelineItem; mode: "move" | "start" | "end"; delta: number };
+/**
+ * The header's controls, where Cardboard's editor has them: the time and undo, redo and snap on the left; back, play and
+ * forward in the middle (back and forward go a caption line); zoom and full screen on the right.
+ */
+export type TimelineControls = {
+  now: string;
+  total: string;
+  playing: boolean;
+  onPlay: () => void;
+  onBack: () => void;
+  onForward: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  snap: boolean;
+  onSnap: () => void;
+  full: boolean;
+  onFull: () => void;
+};
 
 const TRIM_NAME = { pause: "Pause", filler: "Filler", retake: "Retake", cut: "Cut" } as const;
 
-const LABEL = 64;
+// The tracks' names on the left, with the playhead's timecode over them.
+const LABEL = 104;
 // 1×: the whole reel fits (Fit); up to 16× closer. The buttons step by half again; the slider is on a log scale.
 const MAX_ZOOM = 16;
 const ZOOM_STEP = 1.5;
@@ -36,6 +57,15 @@ const TICK_PX = 56;
 const DRAG_PX = 3;
 // Whether empty tracks are hidden, remembered in this browser.
 const HIDE_EMPTY_KEY = "hyped:timeline-hide-empty";
+const TRACK_ICON: Record<string, LucideIcon> = { Cuts: Scissors, Captions, "B-roll": Film, Zooms: ZoomIn, Effects: Sparkles, Emojis: Smile, Sounds: AudioLines, Music };
+// The playhead as a timecode, 00:00:01.250.
+const timecode = (t: number) => {
+  const ms = Math.max(0, Math.round(t * 1000));
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${pad(Math.floor(ms / 3_600_000))}:${pad(Math.floor(ms / 60_000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}.${pad(ms % 1000, 3)}`;
+};
+// A header button: an icon, its name in the tooltip.
+const TOOL = "flex size-7 items-center justify-center rounded-md text-gray-900 transition-colors hover:bg-gray-alpha-200 hover:text-gray-1000 disabled:opacity-40 disabled:hover:bg-transparent";
 
 const same = (a: TimelineItem | null | undefined, b: TimelineItem) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -66,6 +96,8 @@ export function ReelTimeline({
   onDragEnd,
   onRange,
   onCutRange,
+  controls,
+  video: clip,
 }: {
   edit: ReelEdit;
   lines: CaptionLine[];
@@ -84,6 +116,9 @@ export function ReelTimeline({
   onDragEnd?: () => void;
   onRange?: (range: [number, number] | null) => void;
   onCutRange?: () => void;
+  controls?: TimelineControls;
+  /** The clip itself, for the Video track's filmstrip and its name on it, as Cardboard's track shows them. */
+  video?: { src: string; name: string };
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
@@ -97,6 +132,7 @@ export function ReelTimeline({
     return () => resize.disconnect();
   }, []);
   const perSecond = (Math.max(200, width - LABEL - 8) / Math.max(1, duration)) * zoom;
+  const frames = useFilmstrip(clip?.src, FILMSTRIP_FRAMES);
   const x = (t: number) => t * perSecond;
   const full = x(duration);
 
@@ -236,7 +272,8 @@ export function ReelTimeline({
 
   const step = TICK_STEPS.find((s) => x(s) >= TICK_PX) ?? TICK_STEPS[TICK_STEPS.length - 1];
   const ticks = Array.from({ length: Math.floor(duration / step) + 1 }, (_, k) => k * step);
-  const tickLabel = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}${step < 1 ? `.${Math.round((t % 1) * 10)}` : ""}`;
+  // Seconds, as Cardboard's ruler counts them (5s, 10s; 1m 5s past a minute).
+  const tickLabel = (t: number) => (t < 60 ? `${step < 1 ? t.toFixed(1) : Math.round(t)}s` : `${Math.floor(t / 60)}m${Math.round(t % 60) ? ` ${Math.round(t % 60)}s` : ""}`);
   const piece = (
     item: TimelineItem,
     left: number,
@@ -262,7 +299,7 @@ export function ReelTimeline({
         className={cn(
           "absolute top-1 flex h-5 touch-none select-none items-center overflow-hidden whitespace-nowrap rounded px-1 text-[11px] leading-none outline-none focus-visible:ring-2 focus-visible:ring-gray-1000",
           editable.moves && onDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
-          on && "z-10 ring-2 ring-gray-1000",
+          on && "z-10 ring-2 ring-brand",
           className,
         )}
         style={{ left, width: Math.max(w, 6) }}
@@ -280,21 +317,21 @@ export function ReelTimeline({
     {
       name: "Cuts",
       items: edit.trims.map((t, i) =>
-        piece({ kind: "trim", index: i }, x(t.start), x(t.end) - x(t.start), "bg-red-300 text-red-1000 hover:bg-red-400", `${TRIM_NAME[t.reason]} cut, ${(t.end - t.start).toFixed(1)} s at ${t.start.toFixed(1)} s`, TRIM_NAME[t.reason], { moves: true, start: true, end: true }),
+        piece({ kind: "trim", index: i }, x(t.start), x(t.end) - x(t.start), "bg-red-700/20 text-red-900 shadow-[inset_2px_0_0_var(--color-red-700)] hover:bg-red-700/30", `${TRIM_NAME[t.reason]} cut, ${(t.end - t.start).toFixed(1)} s at ${t.start.toFixed(1)} s`, TRIM_NAME[t.reason], { moves: true, start: true, end: true }),
       ),
     },
     {
       name: "Captions",
       always: true,
-      items: lines.map((l) => piece({ kind: "line", word: l.words[0].i }, x(l.start), x(l.end) - x(l.start) - 1, "bg-gray-alpha-300 text-gray-1000 hover:bg-gray-alpha-400", l.text, l.text)),
+      items: lines.map((l) => piece({ kind: "line", word: l.words[0].i }, x(l.start), x(l.end) - x(l.start) - 1, "bg-gray-alpha-200 text-gray-1000 shadow-[inset_2px_0_0_var(--color-gray-600)] hover:bg-gray-alpha-300", l.text, l.text)),
     },
     {
       name: "B-roll",
       items: broll.map((b) =>
-        piece({ kind: "broll", index: b.index }, x(b.start), x(b.end) - x(b.start) - 1, "bg-green-300 text-green-1000 hover:bg-green-400", `B-roll: ${b.query || "stock clip"} at ${b.start.toFixed(1)} s`, b.query || "B-roll", { moves: true, start: true, end: true }),
+        piece({ kind: "broll", index: b.index }, x(b.start), x(b.end) - x(b.start) - 1, "bg-green-700/20 text-green-900 shadow-[inset_2px_0_0_var(--color-green-700)] hover:bg-green-700/30", `B-roll: ${b.query || "stock clip"} at ${b.start.toFixed(1)} s`, b.query || "B-roll", { moves: true, start: true, end: true }),
       ),
     },
-    ...(showZooms ? [{ name: "Zooms", items: windows.map((z) => piece({ kind: "zoom", word: z.word ?? 0 }, x(z.start), x(z.end + 0.45) - x(z.start), "bg-blue-300 text-blue-1000 hover:bg-blue-400", `Punch-in at ${z.start.toFixed(1)} s`, "Zoom")) }] : []),
+    ...(showZooms ? [{ name: "Zooms", items: windows.map((z) => piece({ kind: "zoom", word: z.word ?? 0 }, x(z.start), x(z.end + 0.45) - x(z.start), "bg-blue-700/20 text-blue-900 shadow-[inset_2px_0_0_var(--color-blue-700)] hover:bg-blue-700/30", `Punch-in at ${z.start.toFixed(1)} s`, "Zoom")) }] : []),
     {
       name: "Effects",
       items: edit.effects.map((e, i) => {
@@ -302,69 +339,110 @@ export function ReelTimeline({
         const left = x(Math.max(0, a));
         // Up to the next effect, so neighbours don't cover each other (the full name is in the tooltip).
         const room = (edit.effects[i + 1] ? x(Math.max(0, effectSpan(edit.effects[i + 1])[0])) : Infinity) - left - 2;
-        return piece({ kind: "effect", index: i }, left, Math.min(Math.max(x(b) - left, 34), Math.max(10, room)), "bg-purple-300 text-purple-1000 hover:bg-purple-400", `${EFFECTS[e.effect].label} at ${e.at.toFixed(1)} s`, EFFECTS[e.effect].label, { moves: true, end: true });
+        return piece({ kind: "effect", index: i }, left, Math.min(Math.max(x(b) - left, 34), Math.max(10, room)), "bg-purple-700/20 text-purple-900 shadow-[inset_2px_0_0_var(--color-purple-700)] hover:bg-purple-700/30", `${EFFECTS[e.effect].label} at ${e.at.toFixed(1)} s`, EFFECTS[e.effect].label, { moves: true, end: true });
       }),
     },
-    ...(showEmojis ? [{ name: "Emojis", items: shows.map((s) => piece({ kind: "emoji", word: s.word }, x(s.start), x(s.end) - x(s.start), "bg-amber-200 hover:bg-amber-300", `${s.emoji} at ${s.start.toFixed(1)} s`, <span className="text-[13px]">{s.emoji}</span>)) }] : []),
+    ...(showEmojis ? [{ name: "Emojis", items: shows.map((s) => piece({ kind: "emoji", word: s.word }, x(s.start), x(s.end) - x(s.start), "bg-amber-700/20 shadow-[inset_2px_0_0_var(--color-amber-700)] hover:bg-amber-700/30", `${s.emoji} at ${s.start.toFixed(1)} s`, <span className="text-[13px]">{s.emoji}</span>)) }] : []),
     ...(showSounds
       ? [
           {
             name: "Sounds",
             items: edit.sounds.map((s, i) =>
-              piece({ kind: "sound", index: i }, x(s.at), Math.max(12, Math.min(60, (edit.sounds[i + 1] ? x(edit.sounds[i + 1].at) : Infinity) - x(s.at) - 2)), "bg-teal-300 text-teal-1000 hover:bg-teal-400", `${REEL_SOUNDS[s.sound].label} at ${s.at.toFixed(1)} s`, `♪ ${REEL_SOUNDS[s.sound].label}`, { moves: true }),
+              piece({ kind: "sound", index: i }, x(s.at), Math.max(12, Math.min(60, (edit.sounds[i + 1] ? x(edit.sounds[i + 1].at) : Infinity) - x(s.at) - 2)), "bg-teal-700/20 text-teal-900 shadow-[inset_2px_0_0_var(--color-teal-700)] hover:bg-teal-700/30", `${REEL_SOUNDS[s.sound].label} at ${s.at.toFixed(1)} s`, `♪ ${REEL_SOUNDS[s.sound].label}`, { moves: true }),
             ),
           },
         ]
       : []),
-    { name: "Music", items: music ? [piece({ kind: "music" }, 0, full - 1, "bg-pink-200 text-pink-1000 hover:bg-pink-300", `Music: ${REEL_MUSIC[music.track].label}, ${Math.round(music.volume * 100)}%`, `♫ ${REEL_MUSIC[music.track].label} · ${Math.round(music.volume * 100)}%`)] : [] },
+    { name: "Music", items: music ? [piece({ kind: "music" }, 0, full - 1, "bg-pink-700/20 text-pink-900 shadow-[inset_2px_0_0_var(--color-pink-700)] hover:bg-pink-700/30", `Music: ${REEL_MUSIC[music.track].label}, ${Math.round(music.volume * 100)}%`, `♫ ${REEL_MUSIC[music.track].label} · ${Math.round(music.volume * 100)}%`)] : [] },
   ];
   const tracks = hideEmpty ? all.filter((t) => t.always || t.items.length) : all;
   const hidden = all.length - tracks.length;
 
   return (
-    <div className="rounded-lg border border-gray-alpha-400 bg-background-100">
-      <div className="flex items-center justify-between gap-3 border-b border-gray-alpha-400 px-3 py-1.5">
-        <p className="min-w-0 truncate text-xs text-gray-900">
-          Timeline · drag a piece to move it, its edge to resize · drag across Video to cut a part · <kbd className="font-sans">?</kbd> for shortcuts
-        </p>
-        <div className="flex shrink-0 items-center gap-1">
+    <div className="rounded-xl border border-editor-line bg-editor-panel lg:rounded-none lg:border-0">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-editor-line px-2 py-1">
+        <div className="flex min-w-0 items-center gap-0.5">
+          {controls && (
+            <>
+              <span className="mr-1.5 shrink-0 pl-1 text-xs tabular-nums text-gray-1000">
+                {controls.now} <span className="text-gray-900">/ {controls.total}</span>
+              </span>
+              <button type="button" onClick={controls.onUndo} disabled={!controls.canUndo} aria-label="Undo" title="Undo  ⌘Z" className={TOOL}>
+                <Undo2 className="size-3.5" />
+              </button>
+              <button type="button" onClick={controls.onRedo} disabled={!controls.canRedo} aria-label="Redo" title="Redo  ⇧⌘Z" className={TOOL}>
+                <Redo2 className="size-3.5" />
+              </button>
+              <span className="mx-1 h-4 w-px bg-gray-alpha-400" aria-hidden />
+              <button type="button" onClick={controls.onSnap} aria-pressed={controls.snap} aria-label="Snap to the playhead" title={controls.snap ? "Snapping to the playhead: on" : "Snapping to the playhead: off"} className={cn(TOOL, controls.snap && "bg-brand/15 text-brand hover:bg-brand/20 hover:text-brand")}>
+                <Magnet className="size-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {controls && (
+            <>
+              <button type="button" onClick={controls.onBack} aria-label="Previous caption line" title="Previous caption line  ↑" className={TOOL}>
+                <SkipBack className="size-3.5" />
+              </button>
+              <button type="button" onClick={controls.onPlay} aria-label={controls.playing ? "Pause" : "Play"} title={controls.playing ? "Pause  Space" : "Play  Space"} className="flex size-8 items-center justify-center rounded-full text-gray-1000 transition-colors hover:bg-gray-alpha-200">
+                {controls.playing ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
+              </button>
+              <button type="button" onClick={controls.onForward} aria-label="Next caption line" title="Next caption line  ↓" className={TOOL}>
+                <SkipForward className="size-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+        <div className="flex min-w-0 items-center justify-end gap-0.5">
           <button
             type="button"
             onClick={toggleEmpty}
             aria-pressed={!hideEmpty}
             title={hideEmpty ? `Show empty tracks${hidden ? ` (${hidden} hidden)` : ""}` : "Hide empty tracks"}
             aria-label={hideEmpty ? "Show empty tracks" : "Hide empty tracks"}
-            className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100"
+            className={TOOL}
           >
             {hideEmpty ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
           </button>
-          <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1} title="Fit the whole reel" className="h-7 rounded px-2 text-xs text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
+          <div className="mx-1 hidden items-center gap-1 rounded-full border border-gray-alpha-400 px-1.5 py-0.5 sm:flex">
+            <button type="button" onClick={() => zoomTo(zoom / ZOOM_STEP)} disabled={zoom === 1} aria-label="Zoom the timeline out" title="Zoom out" className="flex size-5 items-center justify-center text-gray-900 hover:text-gray-1000 disabled:opacity-40">
+              <ZoomOut className="size-3.5" />
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={Math.log(zoom) / Math.log(MAX_ZOOM)}
+              onChange={(e) => zoomTo(MAX_ZOOM ** Number(e.target.value))}
+              aria-label="Timeline zoom"
+              aria-valuetext={`${zoom.toFixed(1)} times`}
+              className="h-1 w-24 accent-[var(--ds-gray-1000)]"
+            />
+            <button type="button" onClick={() => zoomTo(zoom * ZOOM_STEP)} disabled={zoom === MAX_ZOOM} aria-label="Zoom the timeline in" title="Zoom in" className="flex size-5 items-center justify-center text-gray-900 hover:text-gray-1000 disabled:opacity-40">
+              <ZoomIn className="size-3.5" />
+            </button>
+          </div>
+          <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1} title="Fit the whole reel" className="h-7 rounded-md px-2 text-xs text-gray-900 hover:bg-gray-alpha-200 hover:text-gray-1000 disabled:opacity-40 disabled:hover:bg-transparent">
             Fit
           </button>
-          <button type="button" onClick={() => zoomTo(zoom / ZOOM_STEP)} disabled={zoom === 1} aria-label="Zoom the timeline out" className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
-            <Minus className="size-3.5" />
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={Math.log(zoom) / Math.log(MAX_ZOOM)}
-            onChange={(e) => zoomTo(MAX_ZOOM ** Number(e.target.value))}
-            aria-label="Timeline zoom"
-            aria-valuetext={`${zoom.toFixed(1)} times`}
-            className="hidden h-1 w-20 accent-[var(--ds-gray-1000)] sm:block"
-          />
-          <button type="button" onClick={() => zoomTo(zoom * ZOOM_STEP)} disabled={zoom === MAX_ZOOM} aria-label="Zoom the timeline in" className="flex size-7 items-center justify-center rounded text-gray-900 hover:bg-gray-alpha-100 disabled:opacity-40">
-            <Plus className="size-3.5" />
-          </button>
+          {controls && (
+            <button type="button" onClick={controls.onFull} aria-label={controls.full ? "Exit full screen" : "Full screen"} title={controls.full ? "Exit full screen  F" : "Full screen  F"} className={TOOL}>
+              {controls.full ? <Minimize className="size-3.5" /> : <Maximize className="size-3.5" />}
+            </button>
+          )}
         </div>
       </div>
-      <div ref={box} className="relative overflow-x-auto overscroll-x-contain">
+      {/* No scrollbar under the tracks, as Cardboard's: a trackpad, Shift+wheel, the ruler and the playhead move along. */}
+      <div ref={box} className="relative overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="relative" style={{ width: LABEL + full + 16 }}>
           {/* The ruler. */}
           <div className="flex h-6 border-b border-gray-alpha-400">
-            <div className="sticky left-0 z-20 shrink-0 bg-background-100" style={{ width: LABEL }} />
+            <div className="sticky left-0 z-20 flex shrink-0 items-center bg-editor-panel px-2 text-[10px] tabular-nums text-gray-900" style={{ width: LABEL }}>
+              {timecode(time)}
+            </div>
             <div className="relative cursor-pointer touch-none" style={{ width: full }} {...scrub}>
               {ticks.map((t) => (
                 <span key={t} className="absolute top-0 h-full border-l border-gray-alpha-400 pl-1 text-[10px] tabular-nums leading-6 text-gray-900" style={{ left: x(t) }}>
@@ -375,16 +453,24 @@ export function ReelTimeline({
           </div>
           {/* The video: the recording, from start to end. */}
           <div className="flex h-9 border-b border-gray-alpha-200">
-            <div className="sticky left-0 z-20 flex shrink-0 items-center bg-background-100 px-2 text-[11px] text-gray-900" style={{ width: LABEL }}>
+            <div className="sticky left-0 z-20 flex shrink-0 items-center gap-1.5 bg-editor-panel px-2 text-[11px] text-gray-1000" style={{ width: LABEL }}>
+              <Video className="size-3.5 shrink-0 text-gray-900" />
               Video
             </div>
             <div className="relative cursor-text touch-none" style={{ width: full }} {...video}>
-              <div className="absolute inset-y-1 left-0 right-0 rounded bg-[repeating-linear-gradient(90deg,var(--ds-gray-alpha-300)_0_2px,var(--ds-gray-alpha-200)_2px_6px)]" />
+              <div className="absolute inset-y-1 left-0 right-0 flex overflow-hidden rounded bg-[repeating-linear-gradient(90deg,var(--ds-gray-alpha-300)_0_2px,var(--ds-gray-alpha-200)_2px_6px)]">
+                {/* The clip's frames along it (the pattern shows until they're in), its name over them. */}
+                {frames.map((f, i) => (
+                  <img key={i} src={f} alt="" draggable={false} className="pointer-events-none h-full min-w-0 flex-1 select-none object-cover" />
+                ))}
+                {clip && <span className="pointer-events-none absolute left-1 top-0.5 max-w-[90%] truncate rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{clip.name}</span>}
+              </div>
             </div>
           </div>
           {tracks.map((track) => (
             <div key={track.name} className="flex h-7 border-b border-gray-alpha-200 last:border-b-0">
-              <div className="sticky left-0 z-20 flex shrink-0 items-center bg-background-100 px-2 text-[11px] text-gray-900" style={{ width: LABEL }}>
+              <div className="sticky left-0 z-20 flex shrink-0 items-center gap-1.5 bg-editor-panel px-2 text-[11px] text-gray-1000" style={{ width: LABEL }}>
+                <TrackIcon name={track.name} />
                 {track.name}
               </div>
               <div className="relative cursor-pointer touch-none" style={{ width: full }} {...scrub}>
@@ -418,9 +504,61 @@ export function ReelTimeline({
               </div>
             </>
           )}
-          <span className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5 bg-gray-1000" style={{ left: LABEL + x(time) - 1 }} aria-hidden />
+          <span className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5 bg-brand" style={{ left: LABEL + x(time) - 1 }} aria-hidden />
+          <span className="pointer-events-none absolute top-0 z-10 h-2.5 w-2.5 rounded-b-[3px] bg-brand" style={{ left: LABEL + x(time) - 5 }} aria-hidden />
         </div>
       </div>
     </div>
   );
+}
+
+// How many frames the Video track's filmstrip has, spread along the clip.
+const FILMSTRIP_FRAMES = 14;
+
+/**
+ * Frames of a video along its length, small, made in the browser from a hidden copy of it (seek, draw, next), for the
+ * Video track's filmstrip. They come in one by one; none when the video can't be read.
+ */
+function useFilmstrip(src: string | undefined, count: number) {
+  const [frames, setFrames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!src) return;
+    let stopped = false;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.playsInline = true;
+    video.src = src;
+    const made: string[] = [];
+    const run = async () => {
+      await new Promise((ok, fail) => {
+        video.addEventListener("loadedmetadata", ok, { once: true });
+        video.addEventListener("error", fail, { once: true });
+      });
+      const canvas = document.createElement("canvas");
+      canvas.height = 64;
+      canvas.width = Math.max(1, Math.round((64 * video.videoWidth) / Math.max(1, video.videoHeight)));
+      const ctx = canvas.getContext("2d");
+      for (let i = 0; i < count && !stopped && ctx; i++) {
+        video.currentTime = Math.min(Math.max(0, video.duration - 0.05), ((i + 0.5) * video.duration) / count);
+        await new Promise((ok) => video.addEventListener("seeked", ok, { once: true }));
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        made.push(canvas.toDataURL("image/jpeg", 0.6));
+        if (!stopped) setFrames([...made]);
+      }
+    };
+    run().catch(() => {});
+    return () => {
+      stopped = true;
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, [src, count]);
+  return frames;
+}
+
+/** A track's icon, by its name. */
+function TrackIcon({ name }: { name: string }) {
+  const Icon = TRACK_ICON[name];
+  return Icon ? <Icon className="size-3.5 shrink-0 text-gray-900" /> : null;
 }

@@ -213,6 +213,12 @@
   --color-brand-ink: var(--ds-brand-ink);
   --color-background-100: var(--ds-background-100);
   --color-background-200: var(--ds-background-200);
+  /* The editor's surfaces, always dark (as video editors are, so the video's colours read true): the app behind
+     everything, the panels (library, Ask AI, timeline), the stage around the video, the lines between them. */
+  --color-editor-app: #121214;
+  --color-editor-panel: #161618;
+  --color-editor-stage: #232326;
+  --color-editor-line: #2a2a2e;
   --color-gray-100: var(--ds-gray-100);
   --color-gray-200: var(--ds-gray-200);
   --color-gray-300: var(--ds-gray-300);
@@ -327,6 +333,9 @@
   /* Marketing: each new word of the hero's headline rises into place (hero-prompt.tsx). */
   --animate-word-in: word-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   @keyframes word-in { from { opacity: 0; transform: translateY(0.35em); filter: blur(6px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+  /* Ask AI: a light sweeping across "Working…" while the assistant works (chat-panel.tsx). */
+  --animate-shimmer: shimmer 1.8s linear infinite;
+  @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 }
 
 @layer base {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { listVideos } from "@/lib/data";
-import { hostOf } from "@/lib/format";
+import { projectName } from "@/lib/project-name";
 import { requireUser } from "@/lib/user";
 
 // Live results for the sidebar search: the signed-in user's matching videos, newest first.
@@ -10,6 +10,6 @@ export async function GET(req: Request) {
   if (!q) return NextResponse.json({ videos: [] });
   const jobs = await listVideos(user.id, { q, take: 6 });
   return NextResponse.json({
-    videos: jobs.map((j) => ({ id: j.id, title: hostOf(j.sourceUrl), status: j.status, posterUrl: j.posterUrl, createdAt: j.createdAt, revision: Boolean(j.parentJobId) })),
+    videos: jobs.map((j) => ({ id: j.id, title: projectName(j), status: j.status, posterUrl: j.posterUrl, createdAt: j.createdAt, revision: Boolean(j.parentJobId) })),
   });
 }

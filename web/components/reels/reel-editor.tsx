@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeft, AudioLines, Captions, Check, CircleAlert, FileText, Film, FolderOpen, Keyboard, LoaderCircle, Maximize, Minimize, Palette, PanelLeft, PanelRight, Pause, Play, Plus, Redo2, Scissors, Smile, Sparkles, Undo2, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Check, CircleAlert, FileText, Film, FolderOpen, Keyboard, LoaderCircle, Minimize, Palette, PanelLeft, PanelRight, Pause, Play, Plus, Scissors, Smile, Sparkles, Wand2, History, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { captionLines, cueOf, lineOfWord, resolveLook, type ReelLookChanges, type ReelStyle } from "@launchreel/core/captions";
@@ -13,13 +13,14 @@ import { MUSIC_DEFAULT_VOLUME } from "@launchreel/core/music-beds";
 import { applyChatOps, type ChatOp } from "@launchreel/core/reel-chat";
 import { BROLL_LENGTH, brollAt, longestShot, parseBroll, type BrollShot } from "@launchreel/core/broll";
 import { cn } from "@/lib/cn";
-import { readPrefs } from "@/lib/prefs";
+import { readPrefs, writePrefs } from "@/lib/prefs";
 import { NEW_PROJECT } from "@/components/shell/nav";
+import { ProjectTitle } from "@/components/shell/project-title";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { AudioPanel, type SoundActions } from "./audio-panel";
 import { BrollLayer } from "./broll-layer";
 import { BrollPanel, type BrollActions, type BrollRow } from "./broll-panel";
-import { ChatPanel, type ChatMessage } from "./chat-panel";
+import { ChatPanel, quoted, type ChatMessage, type WorkStep } from "./chat-panel";
 import { describeChanges, revertChanges } from "./chat-steps";
 import { CutsPanel, type TrimActions } from "./cuts-panel";
 import { EffectsPanel, type EffectActions } from "./effects-panel";
@@ -42,11 +43,13 @@ export type EditorOptions = { style: ReelStyle; look: ReelLookChanges; fonts: Re
 type Draft = { options: EditorOptions; edit: ReelEdit };
 type History = { past: Draft[]; present: Draft; future: Draft[]; group?: string; at?: number };
 
-const TABS = ["Ask AI", "Media", "Style", "Text", "Cuts", "B-roll", "Emojis", "Effects", "Looks", "Audio"] as const;
+const TABS = ["Ask AI", "Library", "Style", "Text", "Cuts", "B-roll", "Emojis", "Effects", "Looks", "Audio"] as const;
 type Tab = (typeof TABS)[number];
 // The tools' icons on the wide screens' rail, where Ask AI has a column of its own.
-const TAB_ICON: Record<Tab, LucideIcon> = { "Ask AI": Sparkles, Media: FolderOpen, Style: Captions, Text: FileText, Cuts: Scissors, "B-roll": Film, Emojis: Smile, Effects: Wand2, Looks: Palette, Audio: AudioLines };
+const TAB_ICON: Record<Tab, LucideIcon> = { "Ask AI": Sparkles, Library: FolderOpen, Style: Captions, Text: FileText, Cuts: Scissors, "B-roll": Film, Emojis: Smile, Effects: Wand2, Looks: Palette, Audio: AudioLines };
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+// A chat's name, as Cardboard's header shows it: its first request.
+const chatTitle = (chat: ChatMessage[]) => chat.find((m) => m.from === "you")?.text ?? "Ask AI";
 const same = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 const ms = (t: number) => Math.round(t * 1000) / 1000;
 // One frame at the render's 30 fps: what the arrow keys step.
@@ -119,14 +122,30 @@ export function ReelEditor({
   const [history, setHistory] = useState<History>({ past: [], present: { options, edit }, future: [] });
   const [exported, setExported] = useState<Draft>({ options, edit });
   const draft = history.present;
-  const [tab, setTab] = useState<Tab>(startOnMedia ? "Media" : askFirst ? "Ask AI" : "Style");
+  const [tab, setTab] = useState<Tab>(startOnMedia ? "Library" : askFirst ? "Ask AI" : "Style");
   // Until it's sent once: the chat panel starts again each time its tab opens.
   const [asked, setAsked] = useState(askFirst);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTrim, setSelectedTrim] = useState<number | null>(null);
   const [selectedShot, setSelectedShot] = useState<number | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>(chatBefore ?? []);
+  // Earlier chats in this visit (newest first): a new chat keeps the one before here, to open again from the history.
+  const [pastChats, setPastChats] = useState<ChatMessage[][]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const newChat = () => {
+    if (chat.length) setPastChats((p) => [chat, ...p].slice(0, 20));
+    setChat([]);
+    setAsked(undefined);
+  };
+  const openChat = (i: number) => {
+    const picked = pastChats[i];
+    setPastChats((p) => [...(chat.length ? [chat] : []), ...p.filter((_, k) => k !== i)]);
+    setChat(picked);
+    setHistoryOpen(false);
+  };
   const [asking, setAsking] = useState(false);
+  // While Ask AI works: its steps as they happen.
+  const [live, setLive] = useState<WorkStep[] | null>(null);
   const [exportState, setExportState] = useState<ReelExport | null>(initialExport);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -724,18 +743,34 @@ export function ReelEditor({
   const ask = async (message: string) => {
     setAsking(true);
     setChat((c) => [...c, { from: "you", text: message }]);
+    // The answer's steps, under "Worked for": what was asked, what the assistant looked at, what it worked out.
+    const started = Date.now();
+    const words = history.present.edit.words.length;
+    const looked = [`At ${clock(viewTime)}`, ...(selection ? [selection.label] : []), words ? `${words} caption words` : "No captions yet"];
+    const done: WorkStep[] = [
+      { title: "Read your request", items: [quoted(message)] },
+      { title: "Looked at the reel", items: looked },
+    ];
+    const work = (changes: string[]) => ({
+      ms: Date.now() - started,
+      steps: [...done, ...(changes.length ? [{ title: `Worked out ${changes.length} change${changes.length === 1 ? "" : "s"}`, items: ["Checked them against your reel"] }, { title: "Made them in your reel" }] : [{ title: "Found nothing to change" }])],
+    });
+    // Live while it works, as Claude's and Cardboard's chats show it.
+    setLive([...done, { title: "Working out the changes", status: "active" }, { title: "Making them in your reel", status: "pending" }]);
     const res = await fetch(localAsk ? "/api/local/chat" : `/api/reels/${jobId}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, time, draft: history.present, selection: selection?.ai }) }).catch(() => null);
     const body = res ? ((await res.json().catch(() => ({}))) as { reply?: string; ops?: ChatOp[]; error?: string }) : { error: "You're offline. Try again in a moment." };
     setAsking(false);
+    setLive(null);
     if (!res?.ok || !body.ops) return setChat((c) => [...c, { from: "ai", text: body.error ?? "That didn't work. Try again in a moment.", failed: true }]);
     const ops = body.ops;
-    if (!ops.length) return setChat((c) => [...c, { from: "ai", text: body.reply ?? "Done." }]);
+    if (!ops.length) return setChat((c) => [...c, { from: "ai", text: body.reply ?? "Done.", work: work([]) }]);
     const before = latest.current.present;
     const after = applyChatOps(before, ops) as Draft;
     update((d) => (d === before ? after : (applyChatOps(d, ops) as Draft)));
     const step = ++answered.current;
     steps.current.set(step, { before, after });
-    setChat((c) => [...c, { from: "ai", text: body.reply ?? "Done.", changes: describeChanges(before, after), step }]);
+    const changes = describeChanges(before, after);
+    setChat((c) => [...c, { from: "ai", text: body.reply ?? "Done.", changes, step, work: work(changes) }]);
   };
   // Undo this: the answer's parts put back, as a step of its own (so it can be redone); later edits elsewhere stay.
   const undoAnswer = (m: ChatMessage) => {
@@ -794,7 +829,7 @@ export function ReelEditor({
   const portrait = draft.edit.height >= draft.edit.width * 1.15;
   // Wide screens' columns: the rail, the tools' panel, the preview, Ask AI. A hidden tools' panel closes up (the rail
   // stays); a hidden Ask AI leaves a rail of its own, as the tools' (its button to show it again, where it was).
-  const columns = `44px ${leftOpen ? "minmax(0,300px)" : "0px"} minmax(0,1fr) ${rightOpen ? "minmax(0,340px)" : "44px"}`;
+  const columns = `56px ${leftOpen ? "minmax(0,320px)" : "0px"} minmax(0,1fr) ${rightOpen ? "minmax(0,360px)" : "52px"}`;
   const openTool = (t: Tab) => {
     setTab(t);
     setLeftOpen(true);
@@ -803,18 +838,18 @@ export function ReelEditor({
   return (
     // Wide screens: the editor fills the window and never scrolls as a page: the bar and the timeline keep their
     // height, the panels and the preview take the rest (only panels scroll inside).
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:py-3">
+    <div className="flex w-full flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:p-0">
       {/* The bar: back, name, where the edits are kept; a new project (named, as Cardboard's buttons are), the reel's
           shape, the keys, undo and redo, export. */}
-      <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 lg:mb-3">
+      <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 lg:mb-0 lg:h-12 lg:flex-nowrap lg:border-b lg:border-editor-line lg:px-3">
         <ButtonLink href={local ? "/dashboard" : `/dashboard/videos/${jobId}`} variant="tertiary" size="sm" aria-label={local ? "Back to the dashboard" : "Back to the reel"} title={local ? "Back to the dashboard" : "Back to the reel"}>
           <ArrowLeft />
         </ButtonLink>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-medium text-gray-1000">Edit reel</h1>
+          <ProjectTitle jobId={local ? null : jobId} name={name} />
           <p className="flex min-w-0 items-center gap-1.5 text-xs text-gray-900">
-            <span className="truncate">
-              {name} · {local ? "on this computer, not uploaded" : `free exports until ${until}`}
+            <span className="truncate" title={local ? "Open from your computer, not uploaded: B-roll search and Export need the clip uploaded." : undefined}>
+              Reel · {local ? "on this computer, not uploaded" : `free exports until ${until}`}
             </span>
             {!local && (
               <span
@@ -838,22 +873,28 @@ export function ReelEditor({
         <Button variant="tertiary" size="sm" onClick={() => setKeysOpen(true)} aria-label="Keyboard shortcuts (?)" title="Keyboard shortcuts  ?" className="hidden sm:inline-flex">
           <Keyboard />
         </Button>
-        <Button variant="tertiary" size="sm" onClick={undo} disabled={!history.past.length} aria-label="Undo" title="Undo  ⌘Z">
-          <Undo2 />
-        </Button>
-        <Button variant="tertiary" size="sm" onClick={redo} disabled={!history.future.length} aria-label="Redo" title="Redo  ⇧⌘Z">
-          <Redo2 />
-        </Button>
-        <Button variant="primary" onClick={() => setExportOpen(true)} disabled={!canExport} title={local ? "Exporting needs the clip uploaded" : "Export  ⌘E"}>
-          {busy || rendering ? <LoaderCircle className="animate-spin" /> : <Check />}
+        {/* Undo and redo are in the timeline's header; Export is the light button with its key, as Cardboard's. */}
+        <button
+          type="button"
+          onClick={() => setExportOpen(true)}
+          disabled={!canExport}
+          title={local ? "Exporting needs the clip uploaded" : "Export  ⌘E"}
+          className="flex h-8 items-center gap-2 rounded-md bg-gray-1000 px-3 text-sm font-medium text-background-100 transition-colors hover:bg-gray-900 disabled:opacity-50 disabled:hover:bg-gray-1000"
+        >
+          {(busy || rendering) && <LoaderCircle className="size-4 animate-spin" />}
           {rendering ? "Exporting…" : "Export"}
-        </Button>
+          <kbd className="hidden font-sans text-xs opacity-60 sm:inline">⌘E</kbd>
+        </button>
+        {/* Ask AI's panel, shown or hidden, from the bar's corner as Cardboard's. */}
+        <button type="button" onClick={() => setRightOpen((o) => !o)} aria-pressed={rightOpen} aria-label={rightOpen ? "Hide Ask AI (])" : "Show Ask AI (])"} title={rightOpen ? "Hide Ask AI  ]" : "Show Ask AI  ]"} className="hidden size-8 items-center justify-center rounded-md text-gray-900 transition-colors hover:bg-gray-alpha-100 hover:text-gray-1000 lg:flex">
+          <PanelRight className="size-4" />
+        </button>
       </div>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} onExport={() => void exportVideo()} watermark={watermark} until={until} />
       <ShortcutsDialog open={keysOpen} onClose={() => setKeysOpen(false)} />
-      {notice && <div className="mb-3 shrink-0 space-y-2">{notice}</div>}
+      {notice && <div className="mb-3 shrink-0 space-y-2 lg:mb-0 lg:border-b lg:border-editor-line lg:px-3 lg:py-2">{notice}</div>}
       {(error || exportState) && (
-        <p className={cn("mb-4 rounded-md border px-3 py-2 text-[13px]", error || exportState?.status === "failed" ? "border-red-500/40 text-red-900" : "border-gray-alpha-400 text-gray-1000")} role="status">
+        <p className={cn("mb-4 rounded-md border px-3 py-2 text-[13px] lg:m-2", error || exportState?.status === "failed" ? "border-red-500/40 text-red-900" : "border-gray-alpha-400 text-gray-1000")} role="status">
           {error ??
             (exportState?.status === "rendering"
               ? "Exporting your edits. It takes a minute or two; you can keep editing or leave this page."
@@ -872,23 +913,24 @@ export function ReelEditor({
 
       {/* Wide screens, as Cardboard's editor: the tools' rail and panel, the preview in the middle, Ask AI always open on
           the right, the timeline below. Phones: the preview, then the tools as tabs, Ask AI among them. */}
-      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--cols)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-x-5 lg:gap-y-3" style={{ "--cols": columns } as React.CSSProperties}>
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--cols)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-0" style={{ "--cols": columns } as React.CSSProperties}>
         {/* The preview: the clean video with everything the render adds, drawn live, in the reel's own shape (the render
             keeps the clip's), as large as the column allows: on wide screens the column is a size container, and the
             frame is as wide as its height (less the controls under it) allows for the reel's shape. */}
         <div
           ref={stage}
           className={cn(
-            "lg:col-start-3 lg:row-start-1 lg:flex lg:flex-col lg:items-center lg:justify-center lg:overflow-y-auto lg:[container-type:size]",
+            // The stage: a panel of its own around the video, as Cardboard's.
+            "lg:col-start-3 lg:row-start-1 lg:flex lg:flex-col lg:items-center lg:justify-center lg:overflow-y-auto lg:border-[24px] lg:border-editor-stage lg:bg-black lg:[container-type:size]",
             // Full screen: the same column, the whole screen, on black (the frame sizes itself to it as on wide screens).
-            full && "flex flex-col items-center justify-center overflow-y-auto bg-black p-4 [container-type:size]",
+            full && "flex flex-col items-center justify-center overflow-y-auto bg-black p-4 [container-type:size] lg:rounded-none lg:border-0 lg:bg-black",
           )}
           style={{ "--shape": draft.edit.width / draft.edit.height } as React.CSSProperties}
         >
           <div
             ref={frameRef}
             className={cn(
-              "relative mx-auto w-full shrink-0 overflow-hidden rounded-xl bg-black lg:w-[min(100cqw,calc((100cqh-4rem)*var(--shape)))] lg:max-w-none",
+              "relative mx-auto w-full shrink-0 overflow-hidden rounded-lg bg-black lg:w-[min(100cqw,calc(100cqh*var(--shape)))] lg:max-w-none lg:rounded-none",
               portrait ? "max-w-[240px] sm:max-w-[300px]" : "max-w-[640px]",
               full && "w-[min(100cqw,calc((100cqh-4rem)*var(--shape)))] max-w-none",
             )}
@@ -931,17 +973,8 @@ export function ReelEditor({
                 </button>
               </div>
             )}
-            {/* Paused: a small play button in the corner, clear of the captions being edited, and how to edit. */}
-            {!playing && !inline && (
-              <>
-                <button type="button" onClick={toggle} className="absolute left-2 top-2 flex size-9 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm" aria-label="Play">
-                  <Play className="ml-0.5 size-4 fill-current" />
-                </button>
-                <span className="pointer-events-none absolute right-2 top-2.5 max-w-[calc(100%-3.75rem)] truncate rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-white backdrop-blur-sm">
-                  Click a caption to edit<span className="hidden sm:inline"> · drag to move</span>
-                </span>
-              </>
-            )}
+            {/* Nothing over the video, as Cardboard's: play is in the timeline's header (and Space, or a click on the
+                video); captions are edited with a click on them. */}
           </div>
           {inline && (
             <InlineEditor
@@ -956,29 +989,27 @@ export function ReelEditor({
               {"word" in inline && <WordPanel word={inline.word} edit={draft.edit} keyName={keyName} emojisOn={draft.options.emojis && !behind} zoomsOn={draft.options.zooms} sfxOn={draft.options.sfx} cut={cutWords.has(inline.word)} actions={wordActions} dark />}
             </InlineEditor>
           )}
-          <div
-            className={cn(
-              "mx-auto mt-3 flex w-full shrink-0 items-center gap-3 lg:w-[min(100cqw,max(16rem,calc((100cqh-4rem)*var(--shape))))] lg:max-w-none",
-              portrait ? "max-w-[300px]" : "max-w-[640px]",
-              full && "w-[min(100cqw,max(16rem,calc((100cqh-4rem)*var(--shape))))] max-w-none",
-            )}
-          >
-            <Button variant="tertiary" size="sm" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
-              {playing ? <Pause /> : <Play />}
-            </Button>
-            <input type="range" min={0} max={view.duration} step={0.01} value={viewTime} onChange={(e) => seek(cutAt.toUpload(Number(e.target.value)))} className="h-1 min-w-0 flex-1 accent-[var(--ds-gray-1000)]" aria-label="Position in the reel" />
-            <span className="shrink-0 text-xs tabular-nums text-gray-900" title={trims.length ? `Cut from ${clock(draft.edit.duration)} recorded` : undefined}>
-              {clock(viewTime)} / {clock(view.duration)}
-            </span>
-            <Button variant="tertiary" size="sm" onClick={toggleFull} aria-label={full ? "Exit full screen (F)" : "Full screen (F)"} title={full ? "Exit full screen  F" : "Full screen  F"}>
-              {full ? <Minimize /> : <Maximize />}
-            </Button>
-          </div>
-          {behind && <p className="mx-auto mt-2 max-w-[340px] text-center text-xs text-gray-900">In the video, the big words go behind you.</p>}
+          {/* Play, the time and full screen are in the timeline's header, as Cardboard's editor has them; full screen
+              keeps a bar of its own (the timeline isn't there). */}
+          {full && (
+            <div className="mx-auto mt-3 flex w-[min(100cqw,max(16rem,calc((100cqh-4rem)*var(--shape))))] shrink-0 items-center gap-3 text-white">
+              <button type="button" onClick={toggle} aria-label={playing ? "Pause" : "Play"} className="flex size-8 items-center justify-center rounded-full hover:bg-white/10">
+                {playing ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
+              </button>
+              <input type="range" min={0} max={view.duration} step={0.01} value={viewTime} onChange={(e) => seek(cutAt.toUpload(Number(e.target.value)))} className="h-1 min-w-0 flex-1 accent-white" aria-label="Position in the reel" />
+              <span className="shrink-0 text-xs tabular-nums text-white/70">
+                {clock(viewTime)} / {clock(view.duration)}
+              </span>
+              <button type="button" onClick={toggleFull} aria-label="Exit full screen (F)" title="Exit full screen  F" className="flex size-8 items-center justify-center rounded-md hover:bg-white/10">
+                <Minimize className="size-4" />
+              </button>
+            </div>
+          )}
+          {behind &&<p className="mx-auto mt-2 max-w-[340px] text-center text-xs text-gray-900">In the video, the big words go behind you.</p>}
         </div>
 
         {/* The tools: a rail of icons on wide screens, under the button that hides or shows their panel; tabs on phones. */}
-        <div className="hidden lg:col-start-1 lg:row-start-1 lg:flex lg:flex-col lg:gap-1" role="tablist" aria-label="Tools" aria-orientation="vertical">
+        <div className="hidden lg:col-start-1 lg:row-start-1 lg:flex lg:flex-col lg:items-center lg:gap-1 lg:border-r lg:border-editor-line lg:bg-editor-panel lg:py-2" role="tablist" aria-label="Tools" aria-orientation="vertical">
           <button
             type="button"
             onClick={() => setLeftOpen((o) => !o)}
@@ -1017,10 +1048,10 @@ export function ReelEditor({
         </div>
 
         {/* What to change: the chosen tool. */}
-        <div className={cn("min-w-0 lg:col-start-2 lg:row-start-1 lg:overflow-y-auto lg:pr-1", tab === "Ask AI" && "hidden lg:block", !leftOpen && "lg:hidden")}>
-          <p className="mb-3 hidden text-sm font-medium text-gray-1000 lg:block">{panelTab}</p>
+        <div className={cn("min-w-0 lg:col-start-2 lg:row-start-1 lg:overflow-y-auto lg:border-r lg:border-editor-line lg:bg-editor-panel lg:p-4", tab === "Ask AI" && "hidden lg:block", !leftOpen && "lg:hidden")}>
+          <p className="mb-4 hidden text-lg font-semibold tracking-tight text-gray-1000 lg:block">{panelTab}</p>
 
-          {panelTab === "Media" && (
+          {panelTab === "Library" && (
             <MediaPanel
               name={name}
               previewUrl={previewUrl}
@@ -1103,15 +1134,37 @@ export function ReelEditor({
         </div>
 
         {/* Ask AI: always open beside the preview on wide screens; a tab on phones. */}
-        <div className={cn("min-w-0 lg:col-start-4 lg:row-span-2 lg:row-start-1 lg:flex lg:min-h-0 lg:flex-col", tab !== "Ask AI" && "hidden")}>
+        <div className={cn("min-w-0 lg:col-start-4 lg:row-span-2 lg:row-start-1 lg:flex lg:min-h-0 lg:flex-col", "lg:border-l lg:border-editor-line lg:bg-editor-panel", rightOpen ? "lg:p-3" : "lg:py-2", tab !== "Ask AI" && "hidden")}>
           {rightOpen ? (
             <div className="mb-3 hidden items-center justify-between gap-2 lg:flex">
-              <p className="flex items-center gap-1.5 text-sm font-medium text-gray-1000">
-                <Sparkles className="size-3.5 text-brand" /> Ask AI
+              {/* The chat's name (its first request), its earlier chats and a new one, as Cardboard's. */}
+              <p className="min-w-0 truncate rounded-md bg-gray-alpha-100 px-2 py-1 text-[13px] text-gray-1000" title={chatTitle(chat)}>
+                {chatTitle(chat)}
               </p>
-              <button type="button" onClick={() => setRightOpen(false)} aria-label="Hide Ask AI (])" title="Hide Ask AI  ]" className="flex size-7 items-center justify-center rounded-md text-gray-900 transition-colors hover:bg-gray-alpha-100 hover:text-gray-1000">
-                <PanelRight className="size-4" />
-              </button>
+              <div className="relative flex shrink-0 items-center gap-0.5">
+                <button type="button" onClick={() => setHistoryOpen((o) => !o)} aria-expanded={historyOpen} aria-label="Earlier chats" title="Earlier chats" className="flex size-7 items-center justify-center rounded-md text-gray-900 transition-colors hover:bg-gray-alpha-100 hover:text-gray-1000">
+                  <History className="size-4" />
+                </button>
+                <button type="button" onClick={newChat} disabled={!chat.length || asking} aria-label="New chat" title="New chat" className="flex size-7 items-center justify-center rounded-md text-gray-900 transition-colors hover:bg-gray-alpha-100 hover:text-gray-1000 disabled:opacity-40 disabled:hover:bg-transparent">
+                  <Plus className="size-4" />
+                </button>
+                {historyOpen && (
+                  <>
+                    <button type="button" aria-label="Close" className="fixed inset-0 z-30 cursor-default" onClick={() => setHistoryOpen(false)} />
+                    <div className="absolute right-0 top-9 z-40 w-64 rounded-lg border border-editor-line bg-editor-stage p-1 shadow-xl">
+                      {pastChats.length ? (
+                        pastChats.map((c, i) => (
+                          <button key={i} type="button" onClick={() => openChat(i)} disabled={asking} className="block w-full truncate rounded-md px-2.5 py-1.5 text-left text-[13px] text-gray-1000 hover:bg-gray-alpha-100">
+                            {chatTitle(c)}
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-2.5 py-1.5 text-[13px] text-gray-900">No earlier chats yet. A new chat (+) keeps this one here.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           ) : (
             // Hidden: its rail, as the tools' on the left: the button that shows it again, then Ask AI itself.
@@ -1121,7 +1174,7 @@ export function ReelEditor({
               </button>
               <span className="mb-1 h-px w-7 bg-gray-alpha-400" aria-hidden />
               <button type="button" onClick={focusAsk} aria-label="Ask AI" title="Ask AI  ⌘/" className="flex size-11 items-center justify-center rounded-lg text-gray-900 transition-colors hover:bg-gray-alpha-100 hover:text-gray-1000">
-                <Sparkles className="size-[18px] text-brand" />
+                <Sparkles className="size-[18px]" />
               </button>
             </div>
           )}
@@ -1132,6 +1185,7 @@ export function ReelEditor({
               <ChatPanel
                 messages={chat}
                 busy={asking}
+                live={live}
                 onSend={(m) => (setAsked(undefined), void ask(m))}
                 onUndo={undoAnswer}
                 canUndo={(m) => m.step !== undefined && undoable.has(m.step)}
@@ -1146,7 +1200,7 @@ export function ReelEditor({
 
         {/* The timeline, under the tools and the preview (Ask AI runs the editor's full height beside it, as
             Cardboard's chat): its own height, up to two fifths of the window; more tracks scroll inside it. */}
-        <div className="min-w-0 lg:col-start-1 lg:col-end-4 lg:row-start-2 lg:max-h-[40dvh] lg:overflow-y-auto">
+        <div className="min-w-0 lg:col-start-1 lg:col-end-4 lg:row-start-2 lg:max-h-[40dvh] lg:overflow-y-auto lg:border-t lg:border-editor-line">
           <ReelTimeline
             edit={draft.edit}
             lines={lines}
@@ -1165,6 +1219,26 @@ export function ReelEditor({
             onDragEnd={endDrag}
             onRange={(r) => (setRange(r), r && setTimelinePick(null))}
             onCutRange={cutRange}
+            video={{ src: previewUrl, name }}
+            controls={{
+              now: clock(viewTime),
+              total: clock(view.duration),
+              playing,
+              onPlay: toggle,
+              onBack: () => seek((([...lines].reverse().find((l) => l.start < time - 0.05)?.start ?? -0.01) + 0.01)),
+              onForward: () => {
+                const next = lines.find((l) => l.start > time + 0.05);
+                if (next) seek(next.start + 0.01);
+              },
+              onUndo: undo,
+              onRedo: redo,
+              canUndo: history.past.length > 0,
+              canRedo: history.future.length > 0,
+              snap,
+              onSnap: () => setSnap((on) => (writePrefs({ snap: !on }), !on)),
+              full,
+              onFull: toggleFull,
+            }}
           />
         </div>
       </div>

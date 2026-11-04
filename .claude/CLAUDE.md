@@ -75,7 +75,10 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   greets by its first word), picture, email, deletion by email. Security: Clerk's profile (password, sign-in accounts,
   devices), log out. Plan & billing: plan, credits, Buy credits, Credit history. Preferences (in this browser,
   `lib/prefs.ts`): theme, the default voiceover a new video starts with, snap to the playhead on the timeline, and
-  export quality as it is (1080p, 30 fps, MP4). The landing page follows Cardboard's flow in our
+  export quality as it is (1080p, 30 fps, MP4). Projects can be renamed (Taibanaz, 3 Nov, as Cardboard's): a click on
+  the name in the editor's bar (`components/shell/project-title.tsx`) saves `Job.title` (a new column: PATCH
+  `/api/jobs/[id]`, an empty name going back to the source's), and `projectName()` (`lib/project-name.ts`) names a
+  project everywhere (editor, video page, Projects grid, lists, search). Syed runs `npm run prod:db` before it goes live. The landing page follows Cardboard's flow in our
   own words: hero (a serif headline that cycles "Make a launch video / from your website" and so on, prompt box,
   floating samples), Made with Hyped (masonry), Three steps (paste, direct, share), Everything a video needs (01 story,
   02 edit, 03 publish), use-case tabs, pricing, FAQ. What we don't have yet (videos from words alone, a Mac app,
@@ -125,7 +128,23 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   production), so it comes straight into the Library with no window; Ask AI is told it was found. A video Ask AI brings
   in waits in the Library, and a click on it opens the editor on it (Taibanaz, 3 Nov; Import media, Add and a drop
   still open at once). Ask AI is blank until the first message, its box too: no intro, suggestions or placeholder, in
-  the empty editor and the editor alike, as Cardboard's (Taibanaz, 3 Nov). Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
+  the empty editor and the editor alike, as Cardboard's (Taibanaz, 3 Nov). Each answer has "Worked for 4s ›" over it,
+  as Cardboard's chat (Syed sent its look on 3 Nov: odysseyui's Thought Chain on 21st.dev); opened, the steps as a
+  chain: what was asked, what it looked at (the playhead, the pick, the captions) or did (found the video, opened the
+  folder, kept the edit), what it worked out. The editor's look follows Cardboard's (Taibanaz, 4 Nov, from Syed's
+  screenshot of its Mac app): always dark whatever the theme (`dark` on the editor's wrapper in `app-shell.tsx`), edge
+  to edge with flush parts and hairlines between them, three greys (`--color-editor-app/panel/stage/line` in
+  `globals.css`), the stage a grey border round a black canvas with the video in its middle, square, nothing over it (play is in the timeline's header), as Cardboard's (Taibanaz, 4 Nov), the Video track a filmstrip of the clip with its name (frames made in the browser, `useFilmstrip`), no strip of notes for a clip not uploaded (the bar's subtitle says it), Export the light button with ⌘E, quiet track tints
+  with a line of their colour, and Hyped's lime as the one accent (the playhead, the piece picked, snap when on); the
+  timeline's header has the time, undo/redo and snap (magnet) on the left, back/play/forward in the middle,
+  the zoom pill, Fit and full screen on the right, no hint line and no scrollbar under the tracks, a seconds ruler
+  (5s, 10s) with the playhead's timecode over the track names, icons by them; play no longer sits under the video
+  (full screen keeps a bar); the tools' first tab is Library (search, Add as "coming soon", tiles with their length);
+  Ask AI's header names the chat (its first request), with Earlier chats (this visit's, kept by a new chat) and + (a new chat), and its show/hide button sits at the bar's right end; your messages in grey bubbles, answers as
+  plain text with Copy, a tall input with a round send. While it works, one shimmering line, "Working for 12s ›", closed as
+  Cardboard's (Taibanaz, 4 Nov); a click opens the same chain live: a tick for each step done, a spinner and "In
+  progress" on the one under way (its title shimmering), empty rings for those to come (`chat-panel.tsx`). Only steps
+  that really happen are shown. Next for Cardboard parity: Search with ⌘F, and "Home" or "Dashboard" as the first link's name (her call).
 - Syed's editor spec ("Video Editor Prompt", Slack 29 Oct: a four-zone workspace, phase 1), the parts added on
   `launch/realtime-editor` (2 Nov, in PR #13): a Media tab (`media-panel.tsx`); Ask AI answers list what they
   changed with Undo this for that answer alone (`chat-steps.ts`), the box shows "At 0:12 · what's picked" and sends the

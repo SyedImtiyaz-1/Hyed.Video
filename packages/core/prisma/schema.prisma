@@ -49,6 +49,7 @@ model Job {
   kind         String     @default("video") // video | reel (the customer's own video, captioned and edited)
   sourceType   SourceType
   sourceUrl    String     // the website or repo; for reels, the uploaded file's name
+  title        String?    // the project's name, when the customer gave one (else it's named after its source)
   tone         String?
   format       String     @default("landscape")
   durationSec  Int        @default(20)

@@ -89,8 +89,6 @@ export function LocalEditor() {
   const [reading, setReading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hearing, setHearing] = useState<Hearing | null>(null);
-  // Sent here because the clip's upload failed (local development without the render Worker: prompt-box.tsx).
-  const [notUploaded, setNotUploaded] = useState(false);
   // What was said to Ask AI before the clip (in the empty editor): it carries on in the editor's Ask AI.
   const [chat, setChat] = useState<HandedChat | null>(null);
   const started = useRef(false);
@@ -128,7 +126,6 @@ export function LocalEditor() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    setNotUploaded(new URLSearchParams(window.location.search).get("upload") === "failed");
     const handed = takeClip();
     setChat(takeChat());
     if (handed) void open(handed);
@@ -142,13 +139,8 @@ export function LocalEditor() {
     const big = clip.edit.width * clip.edit.height > 1920 * 1080 * 1.1;
     // The notes go inside the editor, under its bar, so it still fits the window with its timeline.
     const notes = [
-      notUploaded && (
-        <p key="upload" className="truncate rounded-lg border border-amber-400 bg-amber-100 px-3 py-1.5 text-[13px] text-amber-900" role="status" title="Editing and captions work here; Ask AI, B-roll search and Export need the upload.">
-          Your clip couldn&apos;t upload (the local render Worker isn&apos;t running), so it opened from your computer. Ask AI, B-roll search and Export need the upload.
-        </p>
-      ),
       big && (
-        <p key="big" className="truncate rounded-lg border border-amber-400 bg-amber-100 px-3 py-1.5 text-[13px] text-amber-900" title="Uploaded clips get a lighter preview to edit on.">
+        <p key="big" className="truncate rounded-lg border border-gray-alpha-400 bg-background-200 px-3 py-1.5 text-xs text-gray-900" title="Uploaded clips get a lighter preview to edit on.">
           This clip is {clip.edit.width}×{clip.edit.height}, so it may play slowly here: it plays from the original file.
         </p>
       ),
