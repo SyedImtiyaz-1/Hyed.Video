@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { parseLookChanges, parseReel, parseReelEdit, REEL_FONTS, REEL_MAX_FONTS, REEL_STYLES, reelEditable, type ReelFont, type ReelJob, type ReelStyle } from "@launchreel/core";
+import { musicLocked, ORIGINAL_MUSIC, parseLookChanges, parseReel, parseReelEdit, REEL_FONTS, REEL_MAX_FONTS, REEL_STYLES, reelEditable, type ReelFont, type ReelJob, type ReelStyle } from "@launchreel/core";
 import { getDb, startExport } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { readEdit, writeEdit } from "@/lib/reel-edits";
@@ -25,6 +25,7 @@ const Body = z.object({
     zooms: z.boolean(),
     sfx: z.boolean(),
     hook: z.boolean(),
+    captions: z.boolean().optional(),
   }),
   edit: z.unknown(),
 });
@@ -32,8 +33,10 @@ const Body = z.object({
 async function ownReel(id: string) {
   const user = await requireUser();
   const db = await getDb();
-  const job = await db.job.findFirst({ where: { id, userId: user.id, kind: "reel" } });
-  return { db, job, reel: job ? parseReel(job.reel) : null };
+  const job = await db.job.findFirst({ where: { id, userId: user.id, kind: { in: ["reel", "video"] } } });
+  const reel = job ? parseReel(job.reel) : null;
+  // A product video is edited once it's ready (Job.reel.video); a reel always has its upload.
+  return { db, job, reel: reel && (job!.kind === "video") === Boolean(reel.video) ? reel : null };
 }
 
 /** The latest export and the reel's current video, for the editor to follow an export. */
@@ -57,22 +60,35 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const editable = reelEditable(job, reel);
   if (!editable.ok) return NextResponse.json({ error: editable.reason }, { status: 400 });
   if (reel.export?.status === "rendering" && Date.now() - Date.parse(reel.export.startedAt) < STALE_EXPORT_MS) {
-    return NextResponse.json({ error: "This reel is already exporting. It'll be ready in a minute or two." }, { status: 409 });
+    return NextResponse.json({ error: `This ${reel.video ? "video" : "reel"} is already exporting. It'll be ready in a minute or two.` }, { status: 409 });
   }
   const revision = (reel.export?.revision ?? 0) + 1;
-  if (revision > MAX_EXPORTS) return NextResponse.json({ error: `A reel can be exported ${MAX_EXPORTS} times. Make a new reel to keep editing.` }, { status: 429 });
+  if (revision > MAX_EXPORTS) return NextResponse.json({ error: reel.video ? `A video can be exported ${MAX_EXPORTS} times. Request a change to make a new version to keep editing.` : `A reel can be exported ${MAX_EXPORTS} times. Make a new reel to keep editing.` }, { status: 429 });
 
   const original = await readEdit(id);
   if (!original) return NextResponse.json({ error: "This reel was made before editing was available. Make it again to edit it." }, { status: 400 });
   const edit = parseReelEdit(parsed.data.edit, original);
   if (!edit) return NextResponse.json({ error: "Every word needs some text, in letters the captions can show." }, { status: 400 });
-  if (!(await (await uploadStore()).head(reel.key))) {
-    return NextResponse.json({ error: "This reel's upload has been deleted, so it can't be exported again." }, { status: 400 });
+  const { captions, ...options } = parsed.data.options;
+  const video = reel.video;
+  if (video) {
+    // What a product video can't take: big words behind a speaker it doesn't have, captions drawn over the ones in its
+    // picture (or with no narration to caption), and a new bed that would lose a narration that wasn't kept apart.
+    if (options.style === "behind") return NextResponse.json({ error: "\"Behind you\" needs a person on camera. Pick another caption style." }, { status: 400 });
+    if (captions !== false && (video.burned || !edit.words.length)) return NextResponse.json({ error: video.burned ? "This video's captions are part of its picture, so they can't be added again." : "This video has no narration to caption." }, { status: 400 });
+    if (musicLocked(video) && edit.audio.music?.track !== ORIGINAL_MUSIC) return NextResponse.json({ error: "This video's soundtrack can't change: its narration wasn't kept apart from the music." }, { status: 400 });
+    if (edit.audio.clean) return NextResponse.json({ error: "Noise clean-up is for recordings, not narrations." }, { status: 400 });
+  } else {
+    if (edit.audio.music?.track === ORIGINAL_MUSIC) return NextResponse.json({ error: "Pick a music bed, or none." }, { status: 400 });
+    if (!(await (await uploadStore()).head(reel.key))) {
+      return NextResponse.json({ error: "This reel's upload has been deleted, so it can't be exported again." }, { status: 400 });
+    }
   }
 
   await writeEdit(id, edit);
   const exporting = { revision, status: "rendering" as const, startedAt: new Date().toISOString() };
-  const next: ReelJob = { ...reel, ...parsed.data.options, export: exporting };
+  const { captions: _, ...kept } = reel;
+  const next: ReelJob = { ...kept, ...options, ...(captions === false ? { captions: false } : {}), export: exporting };
   await db.job.update({ where: { id }, data: { reel: next } });
   try {
     await startExport(id, revision);

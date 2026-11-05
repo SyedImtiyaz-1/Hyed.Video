@@ -54,7 +54,7 @@ export const soundOfWord = (edit: ReelEdit, word: number) => edit.sounds.findInd
 /**
  * The reel's words as the captions show them, a line a row: click a word to jump there and change it, or anything on it.
  */
-export function TranscriptEditor({ edit, lines, time, style, selected, hookOn, onHookText, onHookOn, emojisOn, zoomsOn, sfxOn, cut, actions }: { edit: ReelEdit; lines: CaptionLine[]; time: number; style: ReelStyle; selected: number | null; hookOn: boolean; onHookText: (text: string) => void; onHookOn: (on: boolean) => void; emojisOn: boolean; zoomsOn: boolean; sfxOn: boolean; cut: Set<number>; actions: WordActions }) {
+export function TranscriptEditor({ edit, lines, time, style, selected, hookOn, onHookText, onHookOn, emojisOn, zoomsOn, sfxOn, cut, actions, noun = "reel" }: { edit: ReelEdit; lines: CaptionLine[]; time: number; style: ReelStyle; selected: number | null; hookOn: boolean; onHookText: (text: string) => void; onHookOn: (on: boolean) => void; emojisOn: boolean; zoomsOn: boolean; sfxOn: boolean; cut: Set<number>; actions: WordActions; noun?: "reel" | "video" }) {
   const rows = transcriptRows(edit, lines);
   const playing = lines.findIndex((l) => time >= l.start && time < l.end);
   const keys = new Set(edit.keywords);
@@ -69,7 +69,7 @@ export function TranscriptEditor({ edit, lines, time, style, selected, hookOn, o
           <input type="checkbox" checked={hookOn} onChange={(e) => onHookOn(e.target.checked)} className="size-4 accent-[var(--ds-gray-1000)]" />
           Hook title
         </label>
-        <p className="mt-0.5 pl-7 text-xs text-gray-900">A big title for the first 2.5 seconds: the reel&apos;s promise in a few words.</p>
+        <p className="mt-0.5 pl-7 text-xs text-gray-900">A big title for the first 2.5 seconds: the {noun}&apos;s promise in a few words.</p>
         {hookOn && <input value={edit.hook} maxLength={48} placeholder="3 habits that doubled my sales" onChange={(e) => onHookText(e.target.value)} aria-label="Hook title" className="mt-2 h-9 w-full rounded-md border border-gray-alpha-400 bg-background-100 px-3 text-sm text-gray-1000 outline-none focus:border-gray-1000 sm:ml-7 sm:w-[calc(100%-1.75rem)]" />}
       </div>
 

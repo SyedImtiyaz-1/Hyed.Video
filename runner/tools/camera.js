@@ -8,7 +8,7 @@
  *   const shot = HypedCamera.create(sceneElement, capture, {
  *     base: "capture/home/",              // the capture's folder, relative to this page (where page.png is)
  *     accent: "#C8F135",                  // the brand's accent: rings, clicks and labels
- *     inset: { bottom: 0.2 },             // keep framed targets clear of burned-in captions (0.26 for vertical)
+ *     inset: { bottom: 0.18 },            // keep framed targets clear of burned-in captions (0.24 portrait, 0.28 vertical)
  *     shots: [                            // where the camera looks; it eases from one to the next, then holds
  *       { at: 12.0, on: "window" },                                            // the whole browser window
  *       { at: cue.word("03", "paste").start - 0.15, on: "input-yourproduct-com-or-a-github-repo" },
@@ -41,6 +41,7 @@
  * the page (0-0.8). type { at, until, type, cps }: plays the typing filmed by capture.mjs --type, with a caret.
  * cursor { at, until, cursor, click, move, from, point }: the pointer arrives at the target at `at` (gliding in over
  * `move` seconds, default 0.65) and clicks if click is true; point is where on the element, [0.5, 0.5] by default.
+ * In a phone frame, or a mobile capture shown full-bleed (frame "none"), the pointer is a fingertip that taps.
  * label { at, until, label, text, side, size }: a tag beside the element ("bottom" by default, or top, left, right),
  * outside any ring around it; size is its text height at 1080p (34 by default).
  * `until` ends a mark (it fades out); without it the mark stays to the end of the scene.
@@ -291,8 +292,9 @@
       m.el.textContent = m.text;
     }
     const cursorEl = cursors.length ? node("div", { position: "absolute", left: "0", top: "0", display: "none", transformOrigin: "0 0", filter: "drop-shadow(0 2px 3px rgba(0,0,0,0.45))" }, overlay) : null;
-    // On a phone the pointer is a fingertip: a soft circle that presses down, not an arrow.
-    const touch = o.frame === "phone";
+    // On a phone the pointer is a fingertip: a soft circle that presses down, not an arrow. A mobile capture shown
+    // full-bleed is a phone's screen too (an app store preview, a full-screen vertical scene).
+    const touch = o.frame === "phone" || (o.frame === "none" && !!capture.viewport.mobile);
     if (cursorEl) {
       cursorEl.innerHTML = touch
         ? '<div style="width:100%;height:100%;border-radius:50%;box-sizing:border-box;background:rgba(255,255,255,0.42);border:2px solid rgba(255,255,255,0.92)"></div>'

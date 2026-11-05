@@ -27,6 +27,7 @@ function blankEdit(duration: number, width: number, height: number): ReelEdit {
     emojis: [],
     emojiStyle: { size: "m", place: "auto" },
     zooms: [],
+    transitions: [],
     sounds: [],
     hookSound: null,
     effects: [],

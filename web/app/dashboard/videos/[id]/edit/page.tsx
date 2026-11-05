@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { parseReel, REEL_EDIT_DAYS, reelEditable } from "@launchreel/core/reel";
 import { ButtonLink } from "@/components/ui/button";
 import { ReelEditor } from "@/components/reels/reel-editor";
+import { PrepareVideo } from "@/components/video/prepare-video";
 import { getVideo } from "@/lib/data";
 import { projectName } from "@/lib/project-name";
 import { readEdit } from "@/lib/reel-edits";
@@ -16,8 +17,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * The editor. The prompt box opens it as soon as a video starts, so it shows the first cut being made until it's ready
- * (first-cut.tsx). Then a reel gets the reel editor, within its free-edit window and with its saved decisions; a product
- * video gets its preview, files and Ask AI for revisions (product-video.tsx).
+ * (first-cut.tsx). Then a reel gets the reel editor, within its free-edit window and with its saved decisions, and so
+ * does a finished product video (one made before captions came after the agent is made ready first, once:
+ * PrepareVideo); a product video that can't be edited gets its preview, files and Ask AI for revisions (product-video.tsx).
  */
 export default async function EditReelPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ t?: string }> }) {
   const { id } = await params;
@@ -25,22 +27,29 @@ export default async function EditReelPage({ params, searchParams }: { params: P
   const t = Number((await searchParams).t);
   const user = await requireUser();
   const data = await getVideo(user.id, id);
-  if (!data) notFound();
+  if (!data || (data.job.kind !== "reel" && data.job.kind !== "video")) notFound();
   if (data.job.status !== "SUCCEEDED") return <FirstCut job={data.job} />;
-  if (data.job.kind !== "reel") return <ProductVideo job={data.job} credits={user.credits} />;
-  const reel = parseReel(data.job.reel);
-  if (!reel) notFound();
   const { job } = data;
-  const editable = reelEditable(job, reel);
-  const edit = editable.ok ? await readEdit(id).catch(() => null) : null;
-  if (!editable.ok || !edit) {
+  const product = job.kind === "video";
+  const reel = parseReel(job.reel);
+  const preparing = product && reel?.export?.revision === 0 && reel.export.status !== "done" ? reel.export : null;
+  const editable = product && !reel?.video ? { ok: job.status === "SUCCEEDED", reason: "Only finished videos can be edited." } : reelEditable(job, reel);
+  const edit = editable.ok && !preparing && reel ? await readEdit(id).catch(() => null) : null;
+
+  // A product video that isn't ready to edit yet: made ready here, once.
+  if (product && editable.ok && (!reel?.video || preparing || !edit)) {
+    return <PrepareVideo jobId={id} name={projectName(job)} initial={preparing} />;
+  }
+  // A product video that can't be edited here: its page-like view, with Ask AI for revisions.
+  if (product && (!editable.ok || !edit || !reel)) return <ProductVideo job={job} credits={user.credits} />;
+  if (!editable.ok || !edit || !reel) {
     return (
       <div className="mx-auto w-full max-w-xl px-4 py-16 text-center">
         <h1 className="text-lg font-medium text-gray-1000">This reel can&apos;t be edited</h1>
         <p className="mt-2 text-sm text-gray-900">{editable.reason ?? "It was made before editing was available. Make the reel again to edit it here."}</p>
         <ButtonLink href={`/dashboard/videos/${id}`} variant="secondary" className="mt-6">
           <ArrowLeft />
-          Back to the reel
+          Back to the {product ? "video" : "reel"}
         </ButtonLink>
       </div>
     );
@@ -49,14 +58,17 @@ export default async function EditReelPage({ params, searchParams }: { params: P
     <ReelEditor
       jobId={id}
       name={projectName(job, reel.fileName)}
-      options={{ style: reel.style, look: reel.look, fonts: reel.fonts, emojis: reel.emojis, zooms: reel.zooms, sfx: reel.sfx, hook: reel.hook }}
+      options={{ style: reel.style, look: reel.look, fonts: reel.fonts, emojis: reel.emojis, zooms: reel.zooms, sfx: reel.sfx, hook: reel.hook, ...(reel.captions === false ? { captions: false } : {}) }}
       edit={edit}
       previewUrl={`/api/reels/${id}/preview`}
-      initialExport={reel.export ?? null}
-      editableUntil={new Date(job.createdAt.getTime() + REEL_EDIT_DAYS * 86_400_000).toISOString()}
+      // Making an older video ready (revision 0) isn't an export.
+      initialExport={reel.export && reel.export.revision > 0 ? reel.export : null}
+      editableUntil={product ? null : new Date(job.createdAt.getTime() + REEL_EDIT_DAYS * 86_400_000).toISOString()}
       startAt={Number.isFinite(t) && t >= 0 ? t : undefined}
+      video={reel.video ?? null}
+      voiceUrl={reel.video?.voice ? `/api/reels/${id}/preview?track=voice` : undefined}
       // What the customer asked for when they made it from a reel template, until they've exported an edit.
-      askFirst={!reel.export && job.notes ? job.notes : undefined}
+      askFirst={!product && !reel.export && job.notes ? job.notes : undefined}
       watermark={job.watermark}
     />
   );

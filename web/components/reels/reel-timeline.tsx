@@ -1,12 +1,13 @@
 "use client";
-import { AudioLines, Captions, Eye, EyeOff, Film, Magnet, Maximize, Minimize, Music, Pause, Play, Redo2, Scissors, SkipBack, SkipForward, Smile, Sparkles, Undo2, Video, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
+import { AudioLines, Captions, Diamond, Eye, EyeOff, Film, Magnet, Maximize, Minimize, Music, Pause, Play, Redo2, Scissors, SkipBack, SkipForward, Smile, Sparkles, Undo2, Video, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { CaptionLine } from "@launchreel/core/captions";
 import { EFFECTS, effectSpan } from "@launchreel/core/effects";
-import { REEL_MUSIC } from "@launchreel/core/music-beds";
+import { bedLabel } from "@launchreel/core/music-beds";
 import type { ReelEdit } from "@launchreel/core/reel";
 import { REEL_SOUNDS } from "@launchreel/core/sounds";
 import { emojiShows, type ZoomWindow } from "@launchreel/core/timeline";
+import { TRANSITIONS, type TransitionJoint } from "@launchreel/core/transitions";
 import { cn } from "@/lib/cn";
 
 export type TimelineItem =
@@ -17,7 +18,8 @@ export type TimelineItem =
   | { kind: "sound"; index: number }
   | { kind: "trim"; index: number }
   | { kind: "broll"; index: number }
-  | { kind: "music" };
+  | { kind: "music" }
+  | { kind: "transition"; at: number };
 /** A B-roll shot's span on the recording's clock (it plays straight over any cut inside it). */
 export type BrollSpan = { index: number; start: number; end: number; query: string };
 /** A piece being dragged: by its body (moved) or by an edge (resized), `delta` seconds from where the drag began. */
@@ -57,7 +59,7 @@ const TICK_PX = 56;
 const DRAG_PX = 3;
 // Whether empty tracks are hidden, remembered in this browser.
 const HIDE_EMPTY_KEY = "hyped:timeline-hide-empty";
-const TRACK_ICON: Record<string, LucideIcon> = { Cuts: Scissors, Captions, "B-roll": Film, Zooms: ZoomIn, Effects: Sparkles, Emojis: Smile, Sounds: AudioLines, Music };
+const TRACK_ICON: Record<string, LucideIcon> = { Cuts: Scissors, Captions, "B-roll": Film, Transitions: Diamond, Zooms: ZoomIn, Effects: Sparkles, Emojis: Smile, Sounds: AudioLines, Music };
 // The playhead as a timecode, 00:00:01.250.
 const timecode = (t: number) => {
   const ms = Math.max(0, Math.round(t * 1000));
@@ -71,7 +73,7 @@ const same = (a: TimelineItem | null | undefined, b: TimelineItem) => JSON.strin
 
 /**
  * The reel along time, CapCut-style, on the recording's clock: the video, what's cut (hatched across every track), the
- * captions, the B-roll, the effects and punch-ins, the emojis, the sounds and the music, the shot changes marked across
+ * captions, the B-roll, the transitions (a marker at each joint), the effects and punch-ins, the emojis, the sounds and the music, the shot changes marked across
  * them, and the playhead. Click or drag the ruler to move the playhead; click a piece to select it and edit it.
  *
  * Editing on it, as Cardboard's and CapCut's timelines do: drag a B-roll shot, an effect, a sound or a cut to move it,
@@ -83,6 +85,7 @@ export function ReelTimeline({
   lines,
   windows,
   broll,
+  joints = [],
   time,
   duration,
   showEmojis,
@@ -103,6 +106,7 @@ export function ReelTimeline({
   lines: CaptionLine[];
   windows: ZoomWindow[];
   broll: BrollSpan[];
+  joints?: readonly TransitionJoint[];
   time: number;
   duration: number;
   showEmojis: boolean;
@@ -331,6 +335,20 @@ export function ReelTimeline({
         piece({ kind: "broll", index: b.index }, x(b.start), x(b.end) - x(b.start) - 1, "bg-green-700/20 text-green-900 shadow-[inset_2px_0_0_var(--color-green-700)] hover:bg-green-700/30", `B-roll: ${b.query || "stock clip"} at ${b.start.toFixed(1)} s`, b.query || "B-roll", { moves: true, start: true, end: true }),
       ),
     },
+    ...(joints.length
+      ? [
+          {
+            name: "Transitions",
+            // A marker on each joint (where the next shot starts), as wide as its name allows before the next.
+            items: joints.map((j, i) => {
+              const left = x(j.at) - 5;
+              const room = (joints[i + 1] ? x(joints[i + 1].at) - 5 : Infinity) - left - 2;
+              const label = TRANSITIONS[j.kind].label;
+              return piece({ kind: "transition", at: j.at }, left, Math.min(Math.max(10, room), 74), "bg-pink-700/20 text-pink-900 shadow-[inset_2px_0_0_var(--color-pink-700)] hover:bg-pink-700/30", `${label} at ${j.at.toFixed(1)} s, ${j.length.toFixed(2)} s`, <>◆ {label}</>);
+            }),
+          },
+        ]
+      : []),
     ...(showZooms ? [{ name: "Zooms", items: windows.map((z) => piece({ kind: "zoom", word: z.word ?? 0 }, x(z.start), x(z.end + 0.45) - x(z.start), "bg-blue-700/20 text-blue-900 shadow-[inset_2px_0_0_var(--color-blue-700)] hover:bg-blue-700/30", `Punch-in at ${z.start.toFixed(1)} s`, "Zoom")) }] : []),
     {
       name: "Effects",
@@ -353,7 +371,7 @@ export function ReelTimeline({
           },
         ]
       : []),
-    { name: "Music", items: music ? [piece({ kind: "music" }, 0, full - 1, "bg-pink-700/20 text-pink-900 shadow-[inset_2px_0_0_var(--color-pink-700)] hover:bg-pink-700/30", `Music: ${REEL_MUSIC[music.track].label}, ${Math.round(music.volume * 100)}%`, `♫ ${REEL_MUSIC[music.track].label} · ${Math.round(music.volume * 100)}%`)] : [] },
+    { name: "Music", items: music ? [piece({ kind: "music" }, 0, full - 1, "bg-pink-700/20 text-pink-900 shadow-[inset_2px_0_0_var(--color-pink-700)] hover:bg-pink-700/30", `Music: ${bedLabel(music.track)}, ${Math.round(music.volume * 100)}%`, `♫ ${bedLabel(music.track)} · ${Math.round(music.volume * 100)}%`)] : [] },
   ];
   const tracks = hideEmpty ? all.filter((t) => t.always || t.items.length) : all;
   const hidden = all.length - tracks.length;

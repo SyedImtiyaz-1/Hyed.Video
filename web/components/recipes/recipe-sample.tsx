@@ -8,6 +8,7 @@ const FRAME: Record<Recipe["format"], string> = {
   landscape: "aspect-video w-full",
   vertical: "aspect-[9/16] h-[min(70vh,640px)]",
   square: "aspect-square w-full max-w-[520px]",
+  portrait: "aspect-[4/5] w-full max-w-[460px]",
 };
 
 /** A product-video recipe's story, beat by beat, timed as the recipe is (the agent scales it to the chosen length). */

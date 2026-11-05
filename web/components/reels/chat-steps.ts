@@ -1,10 +1,10 @@
-import { REEL_MUSIC } from "@launchreel/core/music-beds";
+import { bedLabel } from "@launchreel/core/music-beds";
 import type { ReelEdit } from "@launchreel/core/reel";
 import type { EditorOptions } from "./reel-editor";
 
 type Draft = { options: EditorOptions; edit: ReelEdit };
 
-const OPTION_LABEL: Record<keyof EditorOptions, string> = { style: "Caption style", look: "Caption look", fonts: "Big-word fonts", emojis: "Emojis", zooms: "Punch-ins", sfx: "Sound effects", hook: "Hook title" };
+const OPTION_LABEL: Record<keyof EditorOptions, string> = { style: "Caption style", captions: "Captions", look: "Caption look", fonts: "Big-word fonts", emojis: "Emojis", zooms: "Punch-ins", sfx: "Sound effects", hook: "Hook title" };
 // What an answer can change in the edit (the reel's size, length and shot changes it can't).
 const EDIT_LABEL: Partial<Record<keyof ReelEdit, string>> = {
   words: "Caption words",
@@ -52,7 +52,7 @@ export function describeChanges(before: Draft, after: Draft): string[] {
       out.push(`${label}: ${n} reworded`);
     } else if (k === "audio") {
       const [m0, m1] = [before.edit.audio.music, after.edit.audio.music];
-      if (differs(m0?.track, m1?.track)) out.push(m1 ? `Music: ${REEL_MUSIC[m1.track].label}` : "Music off");
+      if (differs(m0?.track, m1?.track)) out.push(m1 ? `Music: ${bedLabel(m1.track)}` : "Music off");
       else if (m1 && m0 && m0.volume !== m1.volume) out.push(`Music volume: ${Math.round(m1.volume * 100)}%`);
       if (before.edit.audio.clean !== after.edit.audio.clean) out.push(`Clean audio ${after.edit.audio.clean ? "on" : "off"}`);
     } else if (Array.isArray(was) && Array.isArray(now) && was.length !== now.length) out.push(`${label}: ${was.length} → ${now.length}`);

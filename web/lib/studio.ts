@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { isDemo } from "./demo";
 
 /**
  * Whether customers can order Studio videos: web Worker var STUDIO_ENABLED ("true" turns it on; .env in local dev).
@@ -7,6 +8,9 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
  */
 export async function studioAvailable(): Promise<boolean> {
   let raw = process.env.STUDIO_ENABLED;
+  // The demo runs without Cloudflare's local platform (next.config.mjs): asking for it here would start one per
+  // request, racing over the same local state.
+  if (isDemo) return raw === "true";
   try {
     const { env } = await getCloudflareContext({ async: true });
     raw = (env as { STUDIO_ENABLED?: string }).STUDIO_ENABLED ?? raw;

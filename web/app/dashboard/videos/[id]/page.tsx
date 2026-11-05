@@ -1,7 +1,7 @@
 import type { Job } from "@launchreel/core";
 import { voiceById } from "@launchreel/core/voices";
 import { customerError } from "@launchreel/core/engines";
-import { parseReel, reelEditable, reelError } from "@launchreel/core/reel";
+import { captionsOn as reelCaptionsOn, parseReel, reelEditable, reelError } from "@launchreel/core/reel";
 import { ArrowUpRight, Captions, Download, GitBranch, Globe, Pencil, Upload } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -72,11 +72,17 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
         actions={
           job.videoUrl && (
             <>
-              {/* A reel can be edited and exported again, free, while its upload is kept. */}
+              {/* A reel can be edited and exported again, free, while its upload is kept; a finished video, any time. */}
               {reel && reelEditable(job, reel).ok && (
                 <Link href={`/dashboard/videos/${job.id}/edit`} className={buttonClasses({})}>
                   <Pencil />
                   Edit reel
+                </Link>
+              )}
+              {job.kind === "video" && job.status === "SUCCEEDED" && (
+                <Link href={`/dashboard/videos/${job.id}/edit`} className={buttonClasses({})}>
+                  <Pencil />
+                  Edit video
                 </Link>
               )}
               {/* The share page previews well on X, LinkedIn and WhatsApp; Download still gives the file itself. */}
@@ -150,7 +156,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
                       </span>
                     </Row>
                     <Row label="Quality">{QUALITY_LABEL[job.quality] ?? "Standard"}</Row>
-                    <Row label="Voiceover">{voiceById(job.voice) ? `${voiceById(job.voice)!.name} · ${job.captions ? "captions burned in" : "no burned-in captions"}` : "None"}</Row>
+                    <Row label="Voiceover">{voiceById(job.voice) ? `${voiceById(job.voice)!.name} · ${captionsOn(job) ? "with captions" : "no captions"}` : "None"}</Row>
                     <Row label="Tone">{toneLabel(job.tone)}</Row>
                   </>
                 )}
@@ -186,6 +192,12 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
       </PageBody>
     </>
   );
+}
+
+/** Whether a product video shows captions: as last edited, else as it was ordered. */
+function captionsOn(job: Job) {
+  const edited = job.kind === "video" ? parseReel(job.reel) : null;
+  return edited?.video && !edited.video.burned ? reelCaptionsOn(edited) : job.captions;
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

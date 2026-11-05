@@ -37,7 +37,7 @@ function cutText(edit: ReelEdit, trim: Trim) {
  * What's cut out of the recording: long pauses, filler sounds and retakes the AI found, and the customer's own cuts.
  * Each can be put back; a word can be cut from the Text tab.
  */
-export function CutsPanel({ edit, cutLength, time, selected, actions }: { edit: ReelEdit; cutLength: number; time: number; selected: number | null; actions: TrimActions }) {
+export function CutsPanel({ edit, cutLength, time, selected, actions, canCutPauses = true }: { edit: ReelEdit; cutLength: number; time: number; selected: number | null; actions: TrimActions; canCutPauses?: boolean }) {
   const trims = edit.trims;
   const totals = trimTotals(trims);
   const removed = trims.reduce((s, t) => s + (t.end - t.start), 0);
@@ -48,13 +48,15 @@ export function CutsPanel({ edit, cutLength, time, selected, actions }: { edit: 
       <div className="rounded-lg border border-gray-alpha-400 p-3">
         <p className="text-sm font-medium text-gray-1000">{trims.length ? `${seconds(removed)} cut: ${clock(edit.duration)} becomes ${clock(cutLength)}` : "Nothing is cut"}</p>
         <p className="mt-0.5 text-xs text-gray-900">
-          {trims.length ? `${kinds.map((r) => `${TRIM_LABEL[r].count(totals[r].count)} (${seconds(totals[r].seconds)})`).join(", ")}. The preview skips them as it plays.` : "Every second of the recording plays. Cut the long pauses, or cut words from the Text tab."}
+          {trims.length ? `${kinds.map((r) => `${TRIM_LABEL[r].count(totals[r].count)} (${seconds(totals[r].seconds)})`).join(", ")}. The preview skips them as it plays.` : canCutPauses ? "Every second of the recording plays. Cut the long pauses, or cut words from the Text tab." : "Every second plays. To take a stretch out, cut its words from the Text tab."}
         </p>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          <button type="button" onClick={actions.cutPauses} className="flex h-8 items-center gap-1.5 rounded-md border border-gray-alpha-400 px-2.5 text-[13px] text-gray-1000 hover:bg-gray-alpha-100">
-            <Scissors className="size-3.5" />
-            Cut long pauses
-          </button>
+          {canCutPauses && (
+            <button type="button" onClick={actions.cutPauses} className="flex h-8 items-center gap-1.5 rounded-md border border-gray-alpha-400 px-2.5 text-[13px] text-gray-1000 hover:bg-gray-alpha-100">
+              <Scissors className="size-3.5" />
+              Cut long pauses
+            </button>
+          )}
           {kinds.map((r) => (
             <button key={r} type="button" onClick={() => actions.restoreAll(r)} className="flex h-8 items-center gap-1.5 rounded-md border border-gray-alpha-400 px-2.5 text-[13px] text-gray-1000 hover:bg-gray-alpha-100">
               <RotateCcw className="size-3.5" />

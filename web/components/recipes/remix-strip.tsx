@@ -11,7 +11,7 @@ import { ScrollRow } from "./scroll-row";
 // The samples on the homepage's gallery, each made with a live recipe.
 const SAMPLES = SHOWCASE.filter((v) => v.gallery !== false && recipeById(v.template)?.status === "live");
 
-const SHAPE: Record<ShowcaseVideo["format"], string> = { landscape: "aspect-video", vertical: "aspect-[9/16]", square: "aspect-square" };
+const SHAPE: Record<ShowcaseVideo["format"], string> = { landscape: "aspect-video", vertical: "aspect-[9/16]", square: "aspect-square", portrait: "aspect-[4/5]" };
 
 /**
  * The top of the recipes: videos Hyped made, each opening the recipe it was made with, behind a tile for a clip of the

@@ -1,7 +1,7 @@
 "use client";
 import { Film, Music, Play, Plus, Search } from "lucide-react";
 import { useState } from "react";
-import { REEL_MUSIC, type ReelAudio } from "@launchreel/core/music-beds";
+import { bedLabel, type ReelAudio } from "@launchreel/core/music-beds";
 import type { BrollRow } from "./broll-panel";
 
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
@@ -47,7 +47,7 @@ export function MediaPanel({
   const q = query.trim().toLowerCase();
   const shows = (label: string) => !q || label.toLowerCase().includes(q);
   const shots = broll.map((r, i) => ({ r, i })).filter(({ r }) => shows(r.shot.query || "Stock clip"));
-  const track = music ? REEL_MUSIC[music.track].label : null;
+  const track = music ? bedLabel(music.track) : null;
   const nothing = !shows(name) && !shots.length && !(track && shows(track));
   return (
     <div>

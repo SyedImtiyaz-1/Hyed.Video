@@ -9,6 +9,7 @@ const SHAPE: Record<ShowcaseVideo["format"], string> = {
   landscape: "aspect-video w-full",
   vertical: "aspect-[9/16] h-full",
   square: "aspect-square h-full",
+  portrait: "aspect-[4/5] h-full",
 };
 
 // Watching: as large as the window allows.
@@ -16,6 +17,7 @@ const WATCH: Record<ShowcaseVideo["format"], string> = {
   landscape: "aspect-video w-[min(92vw,1100px)] max-h-[86vh]",
   vertical: "aspect-[9/16] h-[min(86vh,820px)] max-w-[92vw]",
   square: "aspect-square h-[min(86vh,720px)] max-w-[92vw]",
+  portrait: "aspect-[4/5] h-[min(86vh,780px)] max-w-[92vw]",
 };
 
 /**

@@ -1,7 +1,9 @@
 // Caption looks for reels, as data. The render (runner/src/reel.ts, drawn by libass) and the web app's previews both read
 // them, so what a customer picks is what they get. A look is one of the styles below plus the customer's changes: font,
 // colours, size, position, words per line, capitals, animation, a box behind the spoken word or the line, the stroke
-// and shadow, and bigger key words.
+// and shadow, bigger key words, a lockup layout (key words big on rows of their own), key words in their own font,
+// colour and glow, words still to come shown faintly, letter spacing, and "Behind you"'s big-word colours and casing.
+// Caption templates (caption-templates.ts) are ready-made sets of these changes.
 //
 // Sizes are shares of sqrt(width × height), so a look scales with the video. Colours are "#RRGGBB".
 
@@ -18,8 +20,13 @@ export const REEL_STYLES: readonly ReelStyle[] = ["bold", "hustle", "comic", "be
  * Caption fonts, all free to use (OFL or Apache 2.0; runner/fonts). Inter and Montserrat come in the look's weight; the
  * others have one face each.
  */
-export type CaptionFont = "inter" | "montserrat" | "poppins" | "tiktok" | "roboto" | "rubik" | "anton" | "bebas" | "oswald" | "archivo" | "bangers" | "luckiest" | "abril" | "dmserif" | "instrument" | "kaushan" | "caveat" | "marker";
-export const CAPTION_FONTS: readonly CaptionFont[] = ["inter", "montserrat", "poppins", "tiktok", "roboto", "rubik", "anton", "bebas", "oswald", "archivo", "bangers", "luckiest", "abril", "dmserif", "instrument", "kaushan", "caveat", "marker"];
+export type CaptionFont =
+  | "inter" | "montserrat" | "poppins" | "tiktok" | "roboto" | "rubik" | "anton" | "bebas" | "oswald" | "archivo" | "bangers" | "luckiest" | "abril" | "dmserif" | "instrument" | "kaushan" | "caveat" | "marker"
+  | "playfair" | "instrumentupright" | "archivowide" | "fredoka" | "lilita" | "poppinsitalic" | "dancing" | "greatvibes" | "gochi" | "courier" | "pixel" | "pressstart";
+export const CAPTION_FONTS: readonly CaptionFont[] = [
+  "inter", "montserrat", "poppins", "tiktok", "roboto", "rubik", "anton", "bebas", "oswald", "archivo", "bangers", "luckiest", "abril", "dmserif", "instrument", "kaushan", "caveat", "marker",
+  "playfair", "instrumentupright", "archivowide", "fredoka", "lilita", "poppinsitalic", "dancing", "greatvibes", "gochi", "courier", "pixel", "pressstart",
+];
 
 /** A face's weight, for the fonts that come in several (WEIGHTED_FONTS); the others have one, whatever a look asks for. */
 export type CaptionWeight = "black" | "extrabold" | "semibold" | "medium" | "light";
@@ -42,12 +49,16 @@ export function weightOf(font: CaptionFont, weight: CaptionWeight): CaptionWeigh
 export const CAPTION_FONT_EM: Record<CaptionFont, number> = {
   inter: 0.826, montserrat: 0.64, poppins: 0.568, tiktok: 0.735, roboto: 0.833, rubik: 0.653, anton: 0.577, bebas: 0.769, oswald: 0.588,
   archivo: 0.742, bangers: 0.569, luckiest: 0.816, abril: 0.741, dmserif: 0.729, instrument: 0.769, kaushan: 0.689, caveat: 0.776, marker: 0.701,
+  playfair: 0.709, instrumentupright: 0.769, archivowide: 0.662, fredoka: 0.799, lilita: 0.875, poppinsitalic: 0.568, dancing: 0.713, greatvibes: 0.571,
+  gochi: 0.848, courier: 0.758, pixel: 0.826, pressstart: 0.728,
 };
 
 /** Each font's capital height in em, so a style's letters keep their height when the customer changes its font. */
 export const CAPTION_FONT_CAP: Record<CaptionFont, number> = {
   inter: 0.727, montserrat: 0.7, poppins: 0.705, tiktok: 0.705, roboto: 0.711, rubik: 0.7, anton: 0.859, bebas: 0.7, oswald: 0.81,
   archivo: 0.688, bangers: 0.74, luckiest: 0.702, abril: 0.7, dmserif: 0.66, instrument: 0.72, kaushan: 0.714, caveat: 0.72, marker: 0.74,
+  playfair: 0.708, instrumentupright: 0.72, archivowide: 0.688, fredoka: 0.691, lilita: 0.701, poppinsitalic: 0.702, dancing: 0.72, greatvibes: 0.807,
+  gochi: 0.558, courier: 0.58, pixel: 0.633, pressstart: 1,
 };
 const capPixels = (font: CaptionFont) => CAPTION_FONT_CAP[font] * CAPTION_FONT_EM[font];
 
@@ -88,14 +99,60 @@ export function captionWidth(width: number, height: number, bar = false): number
  * its baseline), "typewriter" (words appear as they're said, letter by letter) and "reveal" (words appear as they're
  * said).
  */
-export type CaptionAnimation = "pop" | "bounce" | "stomp" | "rise" | "typewriter" | "reveal" | "fade" | "none";
-export const CAPTION_ANIMATIONS: readonly CaptionAnimation[] = ["pop", "bounce", "stomp", "rise", "typewriter", "reveal", "fade", "none"];
+export type CaptionAnimation =
+  | "pop"
+  | "bounce"
+  | "stomp"
+  | "rise"
+  | "typewriter"
+  | "reveal"
+  | "fade"
+  | "none"
+  | "jelly"
+  | "stretch"
+  | "heartbeat"
+  | "flash"
+  | "wave"
+  | "blurin"
+  | "drop"
+  | "flicker"
+  | "slideup"
+  | "slidedown";
+export const CAPTION_ANIMATIONS: readonly CaptionAnimation[] = ["pop", "bounce", "stomp", "rise", "jelly", "stretch", "heartbeat", "flash", "wave", "typewriter", "reveal", "blurin", "drop", "flicker", "fade", "slideup", "slidedown", "none"];
 /** The animations that change the spoken word's size (none of them on a marker band, which doesn't grow with the word). */
-export const SCALING_ANIMATIONS: readonly CaptionAnimation[] = ["pop", "bounce", "stomp", "rise"];
+export const SCALING_ANIMATIONS: readonly CaptionAnimation[] = ["pop", "bounce", "stomp", "rise", "jelly", "stretch", "heartbeat", "flash", "wave", "drop"];
 /** The animations that keep words off screen until they're said. */
-export const REVEALING_ANIMATIONS: readonly CaptionAnimation[] = ["typewriter", "reveal"];
+export const REVEALING_ANIMATIONS: readonly CaptionAnimation[] = ["typewriter", "reveal", "blurin", "drop", "flicker"];
 /** Typewriter's pace: a letter every this many seconds. */
 export const TYPEWRITER_LETTER = 0.035;
+
+/**
+ * A step of the newer word-by-word animations, from when the word is said (ms): its size each way (percent of its
+ * own), a blur (a share of the font size), how visible it is (0-1), and how far it's turned white (0-1, flashing back to
+ * its colour). A `cut` step changes at once instead of moving there. Missing values are the word as it rests.
+ */
+export type WordKey = { at: number; sx?: number; sy?: number; blur?: number; alpha?: number; white?: number; cut?: boolean };
+/** The newer word animations as steps (the render writes them as \t transforms, the previews as CSS keyframes). */
+export const WORD_KEYS: Partial<Record<CaptionAnimation, readonly WordKey[]>> = {
+  jelly: [{ at: 0, sx: 130, sy: 70 }, { at: 90, sx: 86, sy: 118 }, { at: 170, sx: 106, sy: 95 }, { at: 250 }],
+  stretch: [{ at: 0, sx: 80, sy: 150 }, { at: 120, sx: 104, sy: 96 }, { at: 200 }],
+  heartbeat: [{ at: 0 }, { at: 90, sx: 116, sy: 116 }, { at: 180 }, { at: 260, sx: 110, sy: 110 }, { at: 340 }],
+  flash: [{ at: 0, sx: 112, sy: 112, white: 1 }, { at: 160 }],
+  blurin: [{ at: 0, blur: 0.35, alpha: 0 }, { at: 160 }],
+  drop: [{ at: 0, sx: 260, sy: 260, alpha: 0 }, { at: 110, sx: 94, sy: 94 }, { at: 170 }],
+  flicker: [{ at: 0, alpha: 0 }, { at: 40, cut: true }, { at: 80, alpha: 0.15, cut: true }, { at: 120, cut: true }, { at: 170, alpha: 0.4, cut: true }, { at: 200, cut: true }],
+};
+/** A word key's values, filled in. */
+export const wordKeyValues = (k: WordKey) => ({ sx: k.sx ?? 100, sy: k.sy ?? 100, blur: k.blur ?? 0, alpha: k.alpha ?? 1, white: k.white ?? 0 });
+
+/** Wave: each letter of the spoken word pops in turn, this far apart (ms), to this size (percent) and back. */
+export const WAVE = { stagger: 45, peak: 140, up: 70, down: 100 } as const;
+
+/** The line comes in from below (slide up) or above (slide down): this far (a share of the font size), in this long (ms). */
+export const LINE_SLIDES: Partial<Record<CaptionAnimation, { dy: number; ms: number }>> = {
+  slideup: { dy: 0.45, ms: 150 },
+  slidedown: { dy: -0.45, ms: 150 },
+};
 
 /** Everything a caption style decides. */
 export type CaptionLook = {
@@ -137,7 +194,103 @@ export type CaptionLook = {
   shadowKind?: "none" | "soft" | "hard";
   /** Key words drawn this much bigger than the rest (1: the same size). */
   keyScale: number;
+  /**
+   * How a line's words sit: in one or two lines, or as a lockup: each key word big (keyScale) on a row of its own, the
+   * words between them small on rows above and below it (lockupRows).
+   */
+  layout: "line" | "lockup";
+  /**
+   * Where the rows line up: centred; at the left (from the left edge of the caption area); or, in a lockup, staggered
+   * (small rows before the first key word and the key rows at the left of the block, small rows after a key word at its
+   * right). A line's "stagger" is centred.
+   */
+  align: "center" | "left" | "stagger";
+  /** Key words in their own font (at the look's weight, where it has weights) and casing, when they differ from the rest. */
+  keyFont?: CaptionFont;
+  keyCasing?: "upper" | "lower" | "as-said";
+  /** A glow in the key colour around key words only (as neon's, which glows every word). */
+  keyGlow: boolean;
+  /** Words still to come show faintly (at GHOST_OPACITY), and words already said keep the spoken word's look (its colour, its box). */
+  ghost: boolean;
+  /** Letter spacing, as a share of the font size (TRACKING; 0 is the font's own). */
+  tracking: number;
+  /** "Behind you": the big words' colours, taking turns line by line, and their casing (else each font's own). */
+  bigColors?: string[];
+  bigCasing?: "upper" | "lower" | "as-said";
 };
+
+/** A lockup's key words: this much bigger than the rest by default, and the range a customer can set. */
+export const LOCKUP_KEY = { scale: 2.2, min: 1.4, max: 3 } as const;
+/**
+ * A lockup's rows stack tighter than lines: each row is this share of its own font size (its ASS size, ascent plus
+ * descent) tall. And a lockup is at most this share of the frame's height (all of it shrinks to fit).
+ */
+export const LOCKUP_LEADING = 0.86;
+export const LOCKUP_MAX_HEIGHT = 0.34;
+/**
+ * How tall a lockup may be, as a share of the height: LOCKUP_MAX_HEIGHT, or less where that would run it off the frame
+ * (wider videos keep their captions low): one hanging from the caption line ends by 0.95 of the height, one standing on
+ * it starts from 0.05.
+ */
+export function lockupMaxHeight(width: number, height: number, look: Pick<CaptionLook, "position" | "offset">): number {
+  const y = captionY(width, height, look);
+  return Math.min(LOCKUP_MAX_HEIGHT, look.position === "bottom" ? y - 0.05 : 0.95 - y);
+}
+/** Letter spacing for the customer's choice, as shares of the font size. */
+export const TRACKING = { tight: -0.04, normal: 0, wide: 0.12 } as const;
+/**
+ * The glow round key words (keyGlow): its width and blur as shares of the key word's font size, and its alpha (0
+ * opaque). Softer than neon's, whose letters are white: here the letters are the glow's own colour, and a strong glow
+ * would swallow them.
+ */
+export const KEY_GLOW = { width: 0.06, blur: 0.18, alpha: 0x80 } as const;
+
+/** Words still to come, with ghost on: how visible (0-1), in the fill, outline, shadow and glow alike. */
+export const GHOST_OPACITY = 0.3;
+
+/**
+ * Key words in a font of their own are sized to the same capital height as the rest (a serif italic's capitals are
+ * shorter than Anton's at one size): their size is the look's size times this. Times keyScale, when they're bigger.
+ */
+export const keyFontScale = (look: Pick<CaptionLook, "font" | "keyFont">) => (look.keyFont ? capPixels(look.font) / capPixels(look.keyFont) : 1);
+
+/**
+ * A lockup line's key words: the line's own (its index of each), or, when it has none, its longest word (by letters,
+ * the last of equals), so every lockup has a big word.
+ */
+export function lockupKeys(words: readonly string[], keys: readonly number[]): number[] {
+  if (keys.length || !words.length) return [...keys].sort((a, b) => a - b);
+  const letters = (w: string) => w.replace(/[^\p{L}\p{N}]/gu, "").length;
+  let best = 0;
+  words.forEach((w, i) => {
+    if (letters(w) >= letters(words[best])) best = i;
+  });
+  return [best];
+}
+
+/**
+ * A lockup's rows, top to bottom, as word ranges [from, to): each key word alone on a big row, each run of words
+ * between them on a small row (which the render and previews break in two if it's too wide, as a line), and each row's
+ * side when staggered.
+ */
+export function lockupRows(count: number, keys: readonly number[]): { from: number; to: number; key: boolean; side: "left" | "right" }[] {
+  const isKey = new Set(keys);
+  const rows: { from: number; to: number; key: boolean; side: "left" | "right" }[] = [];
+  let seenKey = false;
+  for (let i = 0; i < count; ) {
+    if (isKey.has(i)) {
+      rows.push({ from: i, to: i + 1, key: true, side: "left" });
+      seenKey = true;
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < count && !isKey.has(j)) j++;
+    rows.push({ from: i, to: j, key: false, side: seenKey ? "right" : "left" });
+    i = j;
+  }
+  return rows;
+}
 
 /** The customer's stroke widths, as shares of the font size. */
 export const STROKE_WIDTHS = { none: 0, thin: 0.06, thick: 0.14 } as const;
@@ -185,7 +338,7 @@ const GREEN = "#3BF26B";
 const LIME = "#C6FF3D";
 
 // The five original styles keep their look exactly; the rest are new. Words per line: 4 for big type, 6 for sentences.
-const base = { font: "inter", animation: "pop", stroke: "hard", fill: "solid", background: "none", backgroundColor: "#000000", glow: false, hardShadow: false, offset: 0, keyScale: 1 } as const;
+const base = { font: "inter", animation: "pop", stroke: "hard", fill: "solid", background: "none", backgroundColor: "#000000", glow: false, hardShadow: false, offset: 0, keyScale: 1, layout: "line", align: "center", keyGlow: false, ghost: false, tracking: 0 } as const;
 export const CAPTION_STYLES: Record<ReelStyle, CaptionLook> = {
   bold: { ...base, weight: "black", casing: "upper", size: 0.066, color: WHITE, accent: YELLOW, keyword: GREEN, position: "middle", words: 4 },
   behind: { ...base, weight: "extrabold", casing: "as-said", size: 0.05, color: WHITE, accent: WHITE, keyword: WHITE, position: "middle", words: 4, stroke: "soft", animation: "fade" },
@@ -325,6 +478,25 @@ export type ReelLookChanges = {
   shadow?: "none" | "soft" | "hard";
   /** Key words bigger than the rest. */
   bigKeys?: boolean;
+  /** One or two lines, or a lockup (key words big on rows of their own); and where the rows line up. */
+  layout?: "line" | "lockup";
+  align?: "center" | "left" | "stagger";
+  /** Key words: their own font, in capitals (or as said), their own colour (else the highlight), glowing. */
+  keyFont?: CaptionFont;
+  keyCaps?: boolean;
+  keyColor?: string;
+  keyGlow?: boolean;
+  /** A lockup's key words, as a multiple of the rest (LOCKUP_KEY). */
+  keySize?: number;
+  /** Words still to come show faintly; said words keep the highlight. */
+  ghost?: boolean;
+  /** Letter spacing. */
+  spacing?: "tight" | "normal" | "wide";
+  /** The box behind the line's colour. */
+  backColor?: string;
+  /** "Behind you": the big words' colours (1-4, taking turns line by line), and their casing. */
+  bigColors?: string[];
+  bigCase?: "upper" | "lower" | "as-said";
 };
 
 export const CAPTION_SIZE = { min: 0.8, max: 1.5 } as const;
@@ -374,6 +546,23 @@ export function resolveLook(style: ReelStyle, changes: ReelLookChanges = {}): Ca
   if (changes.strokeColor) look.strokeColor = changes.strokeColor;
   if (changes.shadow) look.shadowKind = changes.shadow;
   if (changes.bigKeys) look.keyScale = BIG_KEY_SCALE;
+  if (changes.backColor && (look.background === "box" || look.background === "bar")) look.backgroundColor = changes.backColor;
+  if (changes.keyColor) look.keyword = changes.keyColor;
+  if (changes.keyFont && changes.keyFont !== look.font) look.keyFont = changes.keyFont;
+  if (changes.keyCaps !== undefined) look.keyCasing = changes.keyCaps ? "upper" : "as-said";
+  if (changes.keyGlow) look.keyGlow = true;
+  if (changes.ghost) look.ghost = true;
+  if (changes.spacing) look.tracking = TRACKING[changes.spacing];
+  if (changes.align) look.align = changes.align;
+  // A lockup's key words are big (bigger key words don't add to that); karaoke fills a line, so a lockup's rows take
+  // the highlight colour instead.
+  if (changes.layout === "lockup") {
+    look.layout = "lockup";
+    look.keyScale = changes.keySize ?? LOCKUP_KEY.scale;
+    if (look.fill === "karaoke") look.fill = "solid";
+  }
+  if (changes.bigColors?.length) look.bigColors = changes.bigColors;
+  if (changes.bigCase) look.bigCasing = changes.bigCase;
   // Words on a box stay readable: a colour too close to the box's takes the style's own, or black or white.
   if (look.background === "box") {
     const box = luminance(look.backgroundColor);
@@ -404,5 +593,20 @@ export function parseLookChanges(value: unknown): ReelLookChanges {
   if (typeof v.strokeColor === "string" && HEX.test(v.strokeColor)) out.strokeColor = v.strokeColor.toUpperCase();
   if (v.shadow === "none" || v.shadow === "soft" || v.shadow === "hard") out.shadow = v.shadow;
   if (v.bigKeys === true) out.bigKeys = true;
+  if (v.layout === "line" || v.layout === "lockup") out.layout = v.layout;
+  if (v.align === "center" || v.align === "left" || v.align === "stagger") out.align = v.align;
+  if (CAPTION_FONTS.includes(v.keyFont as CaptionFont)) out.keyFont = v.keyFont as CaptionFont;
+  if (typeof v.keyCaps === "boolean") out.keyCaps = v.keyCaps;
+  if (typeof v.keyColor === "string" && HEX.test(v.keyColor)) out.keyColor = v.keyColor.toUpperCase();
+  if (v.keyGlow === true) out.keyGlow = true;
+  if (typeof v.keySize === "number" && v.keySize >= LOCKUP_KEY.min && v.keySize <= LOCKUP_KEY.max) out.keySize = Math.round(v.keySize * 100) / 100;
+  if (v.ghost === true) out.ghost = true;
+  if (v.spacing === "tight" || v.spacing === "normal" || v.spacing === "wide") out.spacing = v.spacing;
+  if (typeof v.backColor === "string" && HEX.test(v.backColor)) out.backColor = v.backColor.toUpperCase();
+  if (Array.isArray(v.bigColors)) {
+    const colors = v.bigColors.filter((c): c is string => typeof c === "string" && HEX.test(c)).slice(0, 4);
+    if (colors.length) out.bigColors = colors.map((c) => c.toUpperCase());
+  }
+  if (v.bigCase === "upper" || v.bigCase === "lower" || v.bigCase === "as-said") out.bigCase = v.bigCase;
   return out;
 }

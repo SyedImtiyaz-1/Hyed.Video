@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { RepoTokenJwk } from "@launchreel/core/repo-token";
+import { isDemo } from "./demo";
 
 /**
  * The public key browsers encrypt private-repo tokens with (web Worker var REPO_TOKEN_PUBLIC_KEY; .env in local
@@ -8,7 +9,8 @@ import type { RepoTokenJwk } from "@launchreel/core/repo-token";
  */
 export async function getRepoTokenPublicKey(): Promise<RepoTokenJwk | null> {
   let raw = process.env.REPO_TOKEN_PUBLIC_KEY;
-  try {
+  // The demo runs without Cloudflare's local platform (see studioAvailable).
+  if (!isDemo) try {
     const { env } = await getCloudflareContext({ async: true });
     raw = (env as { REPO_TOKEN_PUBLIC_KEY?: string }).REPO_TOKEN_PUBLIC_KEY || raw;
   } catch {

@@ -2,6 +2,7 @@
 import { ArrowRight, Film, LoaderCircle, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { matchingTemplate } from "@launchreel/core/caption-templates";
 import { REEL_DEFAULTS, REEL_LANGUAGES, REEL_MAX_BYTES, REEL_MAX_SECONDS, REEL_SECONDS_PER_CREDIT, type ReelLanguage, type ReelOptions } from "@launchreel/core/reel";
 import { REEL_CLEANUPS, type ReelCleanup } from "@launchreel/core/trims";
 import { EDIT_STYLES, isEditStyle } from "@launchreel/core/edit-styles";
@@ -17,6 +18,7 @@ import { EditStylePicker } from "./edit-style-picker";
 import { FontPicker } from "./font-picker";
 import { LookEditor } from "./look-editor";
 import { StylePicker } from "./style-picker";
+import { TemplateGallery } from "./template-gallery";
 import { megabytes, minutes, shape, useReelUpload } from "./use-reel-upload";
 
 const EXTRAS: { key: "emojis" | "zooms" | "sfx" | "hook" | "broll"; label: string; hint: string }[] = [
@@ -159,6 +161,11 @@ export function ReelForm({ credits, reelCredits = 0, trial, pending, startStyle 
           </div>
 
           <div>
+            <Label>Caption template</Label>
+            <TemplateGallery value={matchingTemplate(options.style, options.look, options.fonts)?.id} onPick={(t) => setOptions((o) => ({ ...o, style: t.style, look: { ...t.look }, ...(t.fonts ? { fonts: [...t.fonts] } : {}) }))} />
+          </div>
+
+          <div>
             <Label>Caption style</Label>
             <StylePicker value={options.style} onChange={(style) => setOptions((o) => ({ ...o, style }))} changes={options.look} />
           </div>
@@ -166,7 +173,7 @@ export function ReelForm({ credits, reelCredits = 0, trial, pending, startStyle 
           {options.style === "behind" && (
             <div>
               <Label>Big words font</Label>
-              <FontPicker value={options.fonts} onChange={(fonts) => setOptions((o) => ({ ...o, fonts }))} />
+              <FontPicker value={options.fonts} onChange={(fonts) => setOptions((o) => ({ ...o, fonts }))} changes={options.look} />
             </div>
           )}
 
