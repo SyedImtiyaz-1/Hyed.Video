@@ -26,7 +26,7 @@ export const demoUser = (): User => ({
 
 function job(fields: Partial<Job> & Pick<Job, "id" | "status" | "sourceType" | "sourceUrl" | "createdAt">): Job {
   return {
-    userId: DEMO_USER_ID, tone: null, format: "landscape", durationSec: 20, notes: null, parentJobId: null,
+    userId: DEMO_USER_ID, title: null, tone: null, format: "landscape", durationSec: 20, notes: null, parentJobId: null,
     creditsCost: 1, paidWith: "credits", watermark: false, privateRepo: false, videoType: "launch", music: "upbeat", brief: null, quality: "standard", voice: null, captions: true, template: null, kind: "video", reel: null, captionsUrl: null, videoUrl: null, posterUrl: null, shareCopy: null, plan: null, error: null,
     model: "claude-opus-5-5", numTurns: null, inputTokens: null, outputTokens: null, cacheReadTokens: null,
     cacheWriteTokens: null, llmCostUsd: null, computeSeconds: null, attempts: 1, startedAt: null, finishedAt: null,

@@ -1,6 +1,5 @@
-import type { Job, Quality } from "@launchreel/core";
+import type { Job } from "@launchreel/core";
 import { voiceById } from "@launchreel/core/voices";
-import { creditsFor } from "@launchreel/core/pricing";
 import { customerError } from "@launchreel/core/engines";
 import { captionsOn as reelCaptionsOn, parseReel, reelEditable, reelError } from "@launchreel/core/reel";
 import { ArrowUpRight, Captions, Download, GitBranch, Globe, Pencil, Upload } from "lucide-react";
@@ -9,9 +8,7 @@ import { notFound } from "next/navigation";
 import { REEL_FONT_INFO, REEL_LANGUAGE_LABEL, REEL_STYLE_INFO, reelExtras, reelName } from "@/components/reels/labels";
 import { ReelPreview } from "@/components/reels/reel-preview";
 import { AutoRefresh } from "@/components/video/auto-refresh";
-import { ReviseForm } from "@/components/video/revise-form";
 import { VideoPreview } from "@/components/video/video-preview";
-import { VideoList } from "@/components/video/video-row";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -21,6 +18,7 @@ import { STATUS } from "@/components/ui/status";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { getVideo } from "@/lib/data";
+import { projectName } from "@/lib/project-name";
 import { FORMAT_LABEL, formatDateTime, formatDuration, hostOf, QUALITY_LABEL, renderSeconds, shortId, toneLabel } from "@/lib/format";
 import { requireUser } from "@/lib/user";
 
@@ -35,10 +33,10 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
   const user = await requireUser();
   const data = await getVideo(user.id, id);
   if (!data) notFound();
-  const { job, parent, revisions } = data;
+  const { job, parent } = data;
   const status = STATUS[job.status];
   const active = job.status === "QUEUED" || job.status === "RUNNING";
-  // Reels (the customer's own video, captioned) share this page: no source link, agent storyboard or revisions.
+  // Reels (the customer's own video, captioned) share this page: no source link or agent storyboard.
   const reel = job.kind === "reel" ? parseReel(job.reel) : null;
 
   return (
@@ -47,13 +45,9 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
       <PageHeader
         title={
           <span className="flex flex-wrap items-center gap-3">
-            {reel ? (
-              <span className="min-w-0 [overflow-wrap:anywhere]" title={reel.fileName}>
-                {reelName(reel.fileName)}
-              </span>
-            ) : (
-              hostOf(job.sourceUrl)
-            )}
+            <span className="min-w-0 [overflow-wrap:anywhere]" title={reel?.fileName ?? job.sourceUrl}>
+              {projectName(job, reel?.fileName)}
+            </span>
             {reel && (
               <Badge tone="purple" size="md">
                 Reel
@@ -132,15 +126,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
               </Card>
             )}
 
-            {!reel && (job.status === "SUCCEEDED" || revisions.length > 0) && (
-              <Card>
-                <CardHeader title="Revisions" description="Describe a change in plain English. The agent edits this video instead of starting over." />
-                <CardContent className="space-y-5">
-                  {revisions.length > 0 && <VideoList jobs={revisions} />}
-                  {job.status === "SUCCEEDED" && <ReviseForm jobId={job.id} credits={user.credits} cost={creditsFor("revision", job.durationSec, job.quality as Quality)} />}
-                </CardContent>
-              </Card>
-            )}
+            {/* No Revisions card here (Syed, 3 Nov): changes are asked for in the editor's Ask AI. */}
           </div>
 
           <aside className="space-y-6">

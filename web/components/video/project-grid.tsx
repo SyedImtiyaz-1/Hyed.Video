@@ -1,10 +1,10 @@
 import type { Job } from "@launchreel/core";
 import { Captions, Plus } from "lucide-react";
 import Link from "next/link";
-import { reelName } from "@/components/reels/labels";
 import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/ui/status";
-import { hostOf, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
+import { projectName } from "@/lib/project-name";
 import { VideoThumb } from "./video-thumb";
 
 /** A video or reel as a card: its poster, what it's of, when, and how long it runs. */
@@ -22,7 +22,7 @@ function ProjectCard({ job }: { job: Job }) {
       </div>
       <p className="mt-2 flex items-center gap-1.5 truncate text-sm font-medium text-gray-1000">
         {reel && <Captions className="size-3.5 shrink-0 text-gray-900" aria-label="Reel" />}
-        <span className="truncate">{reel ? reelName(job.sourceUrl) : hostOf(job.sourceUrl)}</span>
+        <span className="truncate">{projectName(job)}</span>
         {job.parentJobId && <Badge tone="purple">Revision</Badge>}
       </p>
       <p className="mt-0.5 truncate text-xs text-gray-900">

@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeft, Film, FolderOpen, LoaderCircle, Plus, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, Film, FolderOpen, LoaderCircle, Plus, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { pickAsked, type PickFolder } from "@launchreel/core/project-chat";
 import { CLIP_ACCEPT } from "@/components/create/use-clip";
@@ -7,7 +7,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import type { HandedChat } from "@/lib/clip-handoff";
 import { cn } from "@/lib/cn";
 import { freshSession } from "@/lib/fresh-session";
-import { ChatPanel, type ChatMessage } from "./chat-panel";
+import { ChatPanel, quoted, type ChatMessage, type WorkStep } from "./chat-panel";
 
 const FOLDERS: Record<PickFolder, string> = { downloads: "Downloads", desktop: "Desktop", videos: "Videos", documents: "Documents", pictures: "Pictures", music: "Music", any: "" };
 
@@ -46,6 +46,8 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
   const [dragging, setDragging] = useState(false);
   const [said, setSaid] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
+  // While Ask AI works: its steps as they happen.
+  const [live, setLive] = useState<WorkStep[] | null>(null);
   // An edit asked for before the clip: typed into Ask AI once the clip is in, for the customer to send.
   const [kept, setKept] = useState("");
   // The clip in the library: `file`, still to open when Ask AI brought it in (a click opens it), or null once opening.
@@ -93,13 +95,25 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
     }
     setSaid((s) => [...s, { from: "you", text: message }]);
     setAsking(true);
+    // Its steps: shown live as they happen (done, under way, to come), then under the answer's "Worked for": what
+    // was asked, what happened to the video asked for, what was kept.
+    const started = Date.now();
+    const steps: WorkStep[] = [{ title: "Read your request", items: [quoted(message)] }];
+    const progress = (active: WorkStep, ...todo: WorkStep[]) => setLive([...steps, { ...active, status: "active" }, ...todo.map((t) => ({ ...t, status: "pending" as const }))]);
+    const answering: WorkStep = { title: "Writing the answer" };
+    const where = asked ? FOLDERS[asked.folder] || "your folders" : "";
     let file: File | null = null;
     try {
       if (asked && direct) {
+        progress({ title: `Looking in ${where}`, items: [asked.file ? `For ${asked.file}` : "For your newest video"] }, answering);
         file = await fromComputer(asked);
         if (file) bring(file);
         else setWanted({ ...asked, state: "missing" });
+        steps.push(file ? { title: `Found ${file.name}`, items: [`In ${where}`, "Put it in the library"] } : { title: `Looked in ${where}`, items: [asked.file ? `No video named ${asked.file} there` : "No video there"] });
+      } else if (asked) {
+        steps.push({ title: `Opened ${where}`, items: ["For you to choose the video"] });
       }
+      progress(answering);
       await freshSession();
       const res = await fetch("/api/projects/chat", {
         method: "POST",
@@ -111,12 +125,14 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
       if (res.status === 401 || res.status === 404) throw new Error("Your sign-in on this page has expired. Reload the page, then ask again.");
       if (!res.ok || !data.reply) throw new Error(data.error ?? "The assistant didn't answer. Try again in a moment.");
       if (typeof data.keep === "string") setKept(data.keep);
+      if (data.keep && data.keep !== kept) steps.push({ title: "Kept your edit for the clip", items: [data.keep] });
       if (data.pick && !file) setWanted((w) => ({ folder: data.pick!, file: data.file ?? w?.file ?? null, path: w?.path ?? null, state: w?.state }));
-      setSaid((s) => [...s, { from: "ai", text: data.reply! }]);
+      setSaid((s) => [...s, { from: "ai", text: data.reply!, work: { ms: Date.now() - started, steps } }]);
     } catch (err) {
       setSaid((s) => [...s, { from: "ai", text: err instanceof Error ? err.message : "The assistant didn't answer.", failed: true }]);
     } finally {
       setAsking(false);
+      setLive(null);
     }
   };
   useEffect(() => {
@@ -142,9 +158,9 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
 
   return (
     // Wide screens: the window's height, as the editor itself (the timeline stays in view).
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:py-3" {...drop}>
+    <div className="flex w-full flex-col px-4 py-4 sm:px-6 lg:h-dvh lg:min-h-[520px] lg:p-0" {...drop}>
       <input ref={input} type="file" accept={CLIP_ACCEPT} className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => (e.target.files?.[0] && take(e.target.files[0]), (e.target.value = ""))} />
-      <div className="mb-4 flex shrink-0 items-center gap-2 lg:mb-3">
+      <div className="mb-4 flex shrink-0 items-center gap-2 lg:mb-0 lg:h-12 lg:border-b lg:border-editor-line lg:px-3">
         <ButtonLink href="/dashboard" variant="tertiary" size="sm" aria-label="Back to the dashboard">
           <ArrowLeft />
         </ButtonLink>
@@ -152,22 +168,22 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
           <h1 className="truncate text-base font-medium text-gray-1000">Untitled project</h1>
           <p className="truncate text-xs text-gray-900">Nothing in it yet</p>
         </div>
-        <Button variant="primary" disabled title="Import a clip first">
+        <Button disabled title="Import a clip first" className="h-8 border-transparent bg-gray-1000 px-3 text-background-100 disabled:opacity-50">
           Export
         </Button>
       </div>
 
-      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[44px_minmax(0,300px)_minmax(0,1fr)_minmax(0,340px)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-x-5 lg:gap-y-3">
-        <div className="hidden lg:flex lg:flex-col lg:gap-1">
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[56px_minmax(0,320px)_minmax(0,1fr)_minmax(0,360px)] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-0">
+        <div className="hidden lg:flex lg:flex-col lg:items-center lg:gap-1 lg:border-r lg:border-editor-line lg:bg-editor-panel lg:py-2">
           <span className="flex size-11 items-center justify-center rounded-lg bg-gray-alpha-200 text-gray-1000" title="Library">
             <FolderOpen className="size-[18px]" />
           </span>
         </div>
 
         {/* The library: what's in the project (nothing yet). */}
-        <div className="order-2 min-w-0 lg:order-none">
+        <div className="order-2 min-w-0 lg:order-none lg:overflow-y-auto lg:border-r lg:border-editor-line lg:bg-editor-panel lg:p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-gray-1000">Library</p>
+            <p className="text-lg font-semibold tracking-tight text-gray-1000">Library</p>
             <Button variant="secondary" size="sm" onClick={pick} disabled={Boolean(busy)}>
               <Plus />
               Add
@@ -227,7 +243,7 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
         </div>
 
         {/* The stage: import a clip to start. */}
-        <div className={cn("order-1 flex min-h-[320px] min-w-0 flex-col items-center justify-center rounded-xl border bg-black px-6 py-12 text-center text-white transition-colors lg:order-none lg:min-h-0 lg:overflow-auto", dragging ? "border-brand bg-brand/10" : "border-gray-alpha-400")}>
+        <div className={cn("order-1 flex min-h-[320px] min-w-0 flex-col items-center justify-center rounded-xl border bg-black px-6 py-12 text-center text-white transition-colors lg:order-none lg:min-h-0 lg:overflow-auto lg:rounded-none lg:border-[24px] lg:border-editor-stage lg:bg-black", dragging ? "border-brand bg-brand/10 lg:bg-brand/10 lg:ring-2 lg:ring-inset lg:ring-brand" : "border-gray-alpha-400")}>
           {busy ? (
             <>
               <LoaderCircle className="size-6 animate-spin text-white/70" />
@@ -258,14 +274,19 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
         </div>
 
         {/* Ask AI, from the start: the editor's full height, beside the timeline too. */}
-        <div className="order-3 flex min-w-0 flex-col lg:order-none lg:row-span-2 lg:min-h-0">
-          <p className="mb-3 flex items-center gap-1.5 text-sm font-medium text-gray-1000">
-            <Sparkles className="size-3.5 text-brand" /> Ask AI
-          </p>
+        <div className="order-3 flex min-w-0 flex-col lg:order-none lg:row-span-2 lg:min-h-0 lg:border-l lg:border-editor-line lg:bg-editor-panel lg:p-3">
+          {/* As the editor's: the chat's name (its first request) and a new chat. */}
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate rounded-md bg-gray-alpha-100 px-2 py-1 text-[13px] text-gray-1000">{said.find((m) => m.from === "you")?.text ?? "Ask AI"}</p>
+            <button type="button" onClick={() => (setSaid([]), setKept(""))} disabled={!said.length || asking} aria-label="New chat" title="New chat" className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-900 transition-colors hover:bg-gray-alpha-100 hover:text-gray-1000 disabled:opacity-40 disabled:hover:bg-transparent">
+              <Plus className="size-4" />
+            </button>
+          </div>
           <div className="min-h-0 lg:flex-1">
             <ChatPanel
               messages={said}
               busy={asking}
+              live={live}
               onSend={(m) => void ask(m)}
               onUndo={() => {}}
               canUndo={() => false}
@@ -276,7 +297,7 @@ export function EmptyWorkspace({ onFile, busy, error, note }: { onFile: (file: F
         </div>
 
         {/* The timeline, empty, under the library and the stage. */}
-        <div className="order-4 min-w-0 rounded-lg border border-gray-alpha-400 bg-background-100 lg:order-none lg:col-start-1 lg:col-end-4 lg:row-start-2">
+        <div className="order-4 min-w-0 rounded-lg border border-gray-alpha-400 bg-background-100 lg:order-none lg:col-start-1 lg:col-end-4 lg:row-start-2 lg:rounded-none lg:border-x-0 lg:border-b-0 lg:border-t lg:border-editor-line lg:bg-editor-panel">
           <div className="border-b border-gray-alpha-400 px-3 py-1.5 text-xs text-gray-900">Timeline</div>
           <div className="flex h-6 border-b border-gray-alpha-400 pl-16">
             {[0, 5, 10, 15, 20, 25, 30].map((t) => (

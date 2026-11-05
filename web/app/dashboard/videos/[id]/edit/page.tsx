@@ -3,11 +3,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { parseReel, REEL_EDIT_DAYS, reelEditable } from "@launchreel/core/reel";
 import { ButtonLink } from "@/components/ui/button";
-import { reelName } from "@/components/reels/labels";
 import { ReelEditor } from "@/components/reels/reel-editor";
 import { PrepareVideo } from "@/components/video/prepare-video";
 import { getVideo } from "@/lib/data";
-import { hostOf } from "@/lib/format";
+import { projectName } from "@/lib/project-name";
 import { readEdit } from "@/lib/reel-edits";
 import { requireUser } from "@/lib/user";
 import { FirstCut } from "./first-cut";
@@ -39,7 +38,7 @@ export default async function EditReelPage({ params, searchParams }: { params: P
 
   // A product video that isn't ready to edit yet: made ready here, once.
   if (product && editable.ok && (!reel?.video || preparing || !edit)) {
-    return <PrepareVideo jobId={id} name={hostOf(job.sourceUrl)} initial={preparing} />;
+    return <PrepareVideo jobId={id} name={projectName(job)} initial={preparing} />;
   }
   // A product video that can't be edited here: its page-like view, with Ask AI for revisions.
   if (product && (!editable.ok || !edit || !reel)) return <ProductVideo job={job} credits={user.credits} />;
@@ -58,7 +57,7 @@ export default async function EditReelPage({ params, searchParams }: { params: P
   return (
     <ReelEditor
       jobId={id}
-      name={product ? hostOf(job.sourceUrl) : reelName(reel.fileName)}
+      name={projectName(job, reel.fileName)}
       options={{ style: reel.style, look: reel.look, fonts: reel.fonts, emojis: reel.emojis, zooms: reel.zooms, sfx: reel.sfx, hook: reel.hook, ...(reel.captions === false ? { captions: false } : {}) }}
       edit={edit}
       previewUrl={`/api/reels/${id}/preview`}

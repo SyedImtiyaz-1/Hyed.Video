@@ -5,7 +5,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { ReviseForm } from "@/components/video/revise-form";
 import { VideoPreview } from "@/components/video/video-preview";
-import { hostOf } from "@/lib/format";
+import { projectName } from "@/lib/project-name";
 import { AiSaid, EditorFrame, LibraryItem, YouSaid } from "./editor-frame";
 
 /**
@@ -13,9 +13,10 @@ import { AiSaid, EditorFrame, LibraryItem, YouSaid } from "./editor-frame";
  * editor), changes go through Ask AI as a revision, which opens here too; the library has its files.
  */
 export function ProductVideo({ job, credits }: { job: Job; credits: number }) {
-  const name = hostOf(job.sourceUrl);
+  const name = projectName(job);
   return (
     <EditorFrame
+      jobId={job.id}
       name={name}
       detail={`Product video · ${job.durationSec}s`}
       actions={

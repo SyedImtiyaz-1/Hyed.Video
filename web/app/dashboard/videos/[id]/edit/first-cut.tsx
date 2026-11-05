@@ -2,11 +2,11 @@ import type { Job } from "@launchreel/core";
 import { customerError } from "@launchreel/core/engines";
 import { Captions, Globe, LoaderCircle, TriangleAlert } from "lucide-react";
 import { reelError } from "@launchreel/core/reel";
-import { reelName } from "@/components/reels/labels";
 import { ButtonLink } from "@/components/ui/button";
 import { AutoRefresh } from "@/components/video/auto-refresh";
 import { cn } from "@/lib/cn";
-import { formatDuration, hostOf, renderSeconds } from "@/lib/format";
+import { formatDuration, renderSeconds } from "@/lib/format";
+import { projectName } from "@/lib/project-name";
 import { AiSaid, EditorFrame, LibraryItem, YouSaid } from "./editor-frame";
 
 /**
@@ -18,7 +18,7 @@ export function FirstCut({ job }: { job: Job }) {
   const reel = job.kind === "reel";
   const failed = job.status === "FAILED";
   const running = job.status === "RUNNING";
-  const name = reel ? reelName(job.sourceUrl) : hostOf(job.sourceUrl);
+  const name = projectName(job);
   const steps = [
     { label: "Queued", state: "done" },
     { label: reel ? "Cutting, captioning and adding the extras" : "Reading your product and making the video", state: failed ? "error" : running ? "active" : "pending" },
@@ -28,6 +28,7 @@ export function FirstCut({ job }: { job: Job }) {
     <>
       <AutoRefresh active={!failed} />
       <EditorFrame
+        jobId={job.id}
         name={name}
         detail={failed ? "This one didn't work" : `${reel ? "Reel" : "Video"} · first cut on its way`}
         library={<LibraryItem icon={reel ? <Captions /> : <Globe />} title={name} detail={reel ? `Your clip · ${job.durationSec}s` : "Your website or repo"} />}
