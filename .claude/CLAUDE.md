@@ -27,6 +27,8 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
 - Syed's roadmap (26 Oct 2026): ship the product video editor → Recipes gallery + several uploads per video → Premium
   (4K, 60 fps, MOV) → pro editor tools (layouts, titles, looks, sound library) → "make it like this" + one prompt box.
 - Direction (Taibanaz, 27 Oct): build Hyped to Cardboard's level, landing page included, and everything in Syed's plan.
+- Next (Syed, Slack, 4 Nov): "Skills"; he's finishing a document on it, and Taibanaz researches it first. She owns the
+  product from here ("think like a product owner") while he's busier.
 - Merged into `launch/caption-styles` (27–28 Oct): PR #6 `launch/landing-refresh` (below), PR #7 `fix/media-r2-errors`
   (serveFile logs R2's error and returns 503 instead of Cloudflare 1101) and PR #9 `launch/dashboard-templates` (below).
   Then PR #10 merged `launch/caption-styles` into `main` (28 Oct): `main` has everything as of that day. New PRs still
