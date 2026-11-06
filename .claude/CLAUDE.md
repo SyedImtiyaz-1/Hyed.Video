@@ -56,7 +56,9 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   The Product Hunt page's tagline (Taibanaz, 6 Nov): "Make a launch video from a link, or edit your own clip"; logo
   `web/public/brand/hyped-icon-240.png`. Syed, asked which account should make the page (6 Nov): "Leave this", so the
   coming-soon page is off her list for now.
-- Sign-up and sign-in as Cardboard's (Taibanaz, 6 Nov; on `notes/launch-decisions`, not yet in a PR): always dark,
+- Sign-up and sign-in as Cardboard's (Taibanaz, 6 Nov; PR #19, `launch/sign-up-pages` → `main`, with her decisions
+  above; open for Syed's review; screenshots sent to him on Slack with the ask to lower Clerk's 15-character
+  minimum password to 8): always dark,
   the Clerk form on the left under a serif heading ("Make your first video" / "Welcome back") with the terms under it, and
   on wide screens a panel on the right with our showcase posters fanned behind a prompt box that types asks, and three
   chips (`components/auth/`: `auth-shell.tsx`, `auth-showcase.tsx`, `auth-appearance.ts` as style objects, since Clerk's
