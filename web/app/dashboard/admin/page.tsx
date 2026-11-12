@@ -2,6 +2,7 @@ import { INDIA_GST, INR_PER_USD_ESTIMATE, PACKS, REEL_PACKS, unitEconomics, type
 import { purchasedPacks } from "@/lib/ledger";
 import { getDb } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
+import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { StatusDot } from "@/components/ui/status";
@@ -51,7 +52,11 @@ export default async function Admin() {
 
   return (
     <>
-      <PageHeader title="Unit economics" description="Last 30 days, from metered jobs. Failed renders count toward cost." />
+      <PageHeader
+        title="Unit economics"
+        description="Last 30 days, from metered jobs. Failed renders count toward cost."
+        actions={<ButtonLink href="/dashboard/admin/skills" size="sm">Skills</ButtonLink>}
+      />
       <PageBody className="space-y-8">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="Videos delivered" value={done.length} />

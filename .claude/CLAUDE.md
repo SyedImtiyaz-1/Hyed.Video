@@ -30,6 +30,28 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
 - Direction (Taibanaz, 27 Oct): build Hyped to Cardboard's level, landing page included, and everything in Syed's plan.
 - Next (Syed, Slack, 4 Nov): "Skills"; he's finishing a document on it, and Taibanaz researches it first. She owns the
   product from here ("think like a product owner") while he's busier.
+- Syed's ask (Slack, 9 Nov): "a pipeline that will allow everyone to create a skill that will generate a good video,
+  but on the admin side". On 11 Nov he asked for the update on hyped-skills and its architecture; a Google Meet with
+  him and Om is pending (he'll set the time). The proposal (11 Nov): `docs/SKILLS_PIPELINE.md` (on
+  `launch/skills-pipeline`, not yet in a PR; also published as a page, https://claude.ai/artifact/AxvjwAq22FbWywSCHHrsL8):
+  draft → test (hidden, admin-paid test jobs on the golden set's products) → score (Wave 1's gate and critic) →
+  compare with the live version → publish to 10% then 100%, rollback by a pointer; skills as versioned files in
+  private R2 instead of baked into the runner image; six decisions at its end, for Syed. Syed sent v2 on 12 Nov
+  (Slack, `updated-plan.pdf`), built on it after a check against the code: `brag-slim` is version 1 of every scenario
+  (Hyped's skills version 2), rollout starts on Standard (Studio is off in production, `STUDIO_ENABLED` false), both
+  engines tested (Codex and Claude read skills differently), a daily cap per engine enforced by the render Worker
+  (about $25 Standard, $75 Studio), at least 12 test videos to compare and 30 real ones before 100%, automatic rollback
+  when the candidate's hard-fail rate over 20 videos is 10 points above live's, lint also checks every tool the skill
+  calls exists in the runner image, any admin other than the author approves. Build: step 1 (schema, admin list and
+  editor, files to R2, lint; Taibanaz with Claude, web) can start now; step 2 (test jobs; Syed) once deploys work;
+  steps 3–4 after Wave 1. Eight decisions, all with a recommendation, for Taibanaz and Syed.
+  Step 1 built (12 Nov, PR #20 `launch/skills-pipeline` → `main`, open for Syed; tried by Taibanaz locally: import,
+  a new draft, save, discard):
+  schema; `packages/core/src/skills.ts` (`SKILL_SLOTS`: seven scenarios plus `core` and `review`; packs as JSON
+  `{folder, files}` at `skills/<skill>/v<n>.json` in the VIDEOS bucket; `lintSkill`; `RUNNER_TOOLS`, kept in step with
+  `prepareWorkspace`); `web/lib/skills.ts`; `/dashboard/admin/skills` (list, Import of a folder or `runner/skills`
+  whole, a skill's versions, the editor) and `/api/admin/skills/*`, for `ADMIN_USER_IDS` only (a "Skills" button on
+  the admin page). Only drafts change; other versions are kept and start new drafts. Needs `npm run prod:db`.
 - Merged into `launch/caption-styles` (27–28 Oct): PR #6 `launch/landing-refresh` (below), PR #7 `fix/media-r2-errors`
   (serveFile logs R2's error and returns 503 instead of Cloudflare 1101) and PR #9 `launch/dashboard-templates` (below).
   Then PR #10 merged `launch/caption-styles` into `main` (28 Oct): `main` has everything as of that day. New PRs still
@@ -57,8 +79,8 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   `web/public/brand/hyped-icon-240.png`. Syed, asked which account should make the page (6 Nov): "Leave this", so the
   coming-soon page is off her list for now.
 - Sign-up and sign-in as Cardboard's (Taibanaz, 6 Nov; PR #19, `launch/sign-up-pages` → `main`, with her decisions
-  above; open for Syed's review; screenshots sent to him on Slack with the ask to lower Clerk's 15-character
-  minimum password to 8): always dark,
+  above; Syed merged it on 7 Nov ("looks nice!"); his answer on lowering Clerk's 15-character minimum password to 8
+  is still to come): always dark,
   the Clerk form on the left under a serif heading ("Make your first video" / "Welcome back") with the terms under it, and
   on wide screens a panel on the right with our showcase posters fanned behind a prompt box that types asks, and three
   chips (`components/auth/`: `auth-shell.tsx`, `auth-showcase.tsx`, `auth-appearance.ts` as style objects, since Clerk's

@@ -90,8 +90,77 @@ model Job {
   startedAt    DateTime?
   finishedAt   DateTime?
 
+  // --- the skills pipeline (docs/SKILLS_PIPELINE.md): which skill version made it, and whether it's an admin's test ---
+  skillVersion String?    // SkillVersion.id; null for jobs made before the pipeline, on the image's baked-in skills
+  test         Boolean    @default(false) // a hidden test job: never in a customer's projects or the funnel
+
   @@index([status, createdAt])
   @@index([userId, createdAt])
+}
+
+// The skills pipeline (docs/SKILLS_PIPELINE.md): the skills that make Hyped's videos, versioned, tested, scored and
+// published from the admin side. A version's files live in R2 as one JSON pack (skills/<skill>/v<n>.json).
+
+/** A skill the team keeps versions of: a scenario's (launch, update, ...) or a shared one (the core, the review). */
+model Skill {
+  id        String         @id // "launch", "update", ... or "core", "review" (SKILL_SLOTS in packages/core/src/skills.ts)
+  name      String
+  createdAt DateTime       @default(now())
+  versions  SkillVersion[]
+}
+
+model SkillVersion {
+  id         String    @id @default(cuid())
+  skillId    String
+  skill      Skill     @relation(fields: [skillId], references: [id])
+  version    Int       // 1, 2, 3 ... per skill
+  folder     String    // the folder it unpacks into in the workspace: "brag-slim", "hyped-launch", ...
+  r2Key      String    // skills/<skill>/v<n>.json
+  parentId   String?   // the version it was copied from
+  authorId   String
+  authorName String?
+  note       String?
+  status     String    @default("draft") // draft | tested | candidate | live | retired
+  bytes      Int
+  fileCount  Int
+  lint       Json      // SkillLint: errors, warnings, sizes (lintSkill in packages/core/src/skills.ts)
+  tools      String[]  // the runner tools it calls (.hyped/camera.js, ...)
+  engines    String[]  // the engines it has passed on (step 3)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  runs       SkillRun[]
+
+  @@unique([skillId, version])
+}
+
+/** One test video of a version (step 2–3): its product, engine and scores. */
+model SkillRun {
+  id          String       @id @default(cuid())
+  versionId   String
+  version     SkillVersion @relation(fields: [versionId], references: [id])
+  jobId       String       @unique
+  productUrl  String
+  format      String
+  engine      String
+  score       Int?
+  passed      Boolean?
+  hardFails   String[]
+  rounds      Int?
+  humanRating Int?         // 1–5, from the admin who watched it
+  createdAt   DateTime     @default(now())
+
+  @@index([versionId])
+}
+
+/** The live pointer per skill (step 4): what real jobs run, and a candidate on a share of them. */
+model SkillLive {
+  skillId            String   @id
+  liveVersionId      String
+  candidateVersionId String?
+  candidateShare     Int      @default(0) // percent of the skill's Standard jobs
+  changedBy          String
+  changedAt          DateTime @default(now())
+  reason             String?
 }
 
 model CreditEntry {
