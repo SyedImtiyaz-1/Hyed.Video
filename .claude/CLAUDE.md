@@ -45,7 +45,8 @@ then `docs/STRATEGY.md`, `docs/PLAN.md`, `docs/UNIT_ECONOMICS.md`.
   calls exists in the runner image, any admin other than the author approves. Build: step 1 (schema, admin list and
   editor, files to R2, lint; Taibanaz with Claude, web) can start now; step 2 (test jobs; Syed) once deploys work;
   steps 3–4 after Wave 1. Eight decisions, all with a recommendation, for Taibanaz and Syed.
-  Step 1 built (12 Nov, `launch/skills-pipeline`, tried by Taibanaz locally: import, a new draft, save, discard):
+  Step 1 built (12 Nov, PR #20 `launch/skills-pipeline` → `main`, open for Syed; tried by Taibanaz locally: import,
+  a new draft, save, discard):
   schema; `packages/core/src/skills.ts` (`SKILL_SLOTS`: seven scenarios plus `core` and `review`; packs as JSON
   `{folder, files}` at `skills/<skill>/v<n>.json` in the VIDEOS bucket; `lintSkill`; `RUNNER_TOOLS`, kept in step with
   `prepareWorkspace`); `web/lib/skills.ts`; `/dashboard/admin/skills` (list, Import of a folder or `runner/skills`
