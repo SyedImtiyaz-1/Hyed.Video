@@ -4,7 +4,7 @@ import { BRAND } from "@/lib/brand";
 
 // /api/local: local development's routes (captions and Ask AI on a clip from this computer), which spend the root .env's
 // OpenAI key; signed-in people only, as the routes they stand in for.
-const isProtected = createRouteMatcher(["/dashboard(.*)", "/api/jobs(.*)", "/api/checkout(.*)", "/api/billing(.*)", "/api/repo-token(.*)", "/api/search(.*)", "/api/reels(.*)", "/api/projects(.*)", "/api/local(.*)"]);
+const isProtected = createRouteMatcher(["/dashboard(.*)", "/api/jobs(.*)", "/api/checkout(.*)", "/api/billing(.*)", "/api/repo-token(.*)", "/api/search(.*)", "/api/reels(.*)", "/api/projects(.*)", "/api/local(.*)", "/api/admin(.*)"]);
 
 // Demo mode (development only) skips auth entirely; see lib/demo.ts.
 const demo = process.env.DEMO_MODE === "true" && process.env.NODE_ENV !== "production";

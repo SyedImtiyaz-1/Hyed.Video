@@ -43,6 +43,7 @@
     "./project-chat": "./src/project-chat.ts",
     "./broll": "./src/broll.ts",
     "./transitions": "./src/transitions.ts",
-    "./caption-templates": "./src/caption-templates.ts"
+    "./caption-templates": "./src/caption-templates.ts",
+    "./skills": "./src/skills.ts"
   }
 }
